@@ -4,9 +4,9 @@ import { calcCompliance } from '../services/compliance.js';
 import { requireAuth } from '../middleware/auth.js';
 const router = Router();
 
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
-    const { userId } = requireAuth(req);
+    const { userId } = req.auth;
 
     const { rows: [pro] } = await pool.query(
       'SELECT id FROM professionals WHERE clerk_user_id = $1',
