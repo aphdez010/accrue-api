@@ -1,6 +1,4 @@
 import 'dotenv/config';
-import { pool } from './db/pool.js';
-
 import express from 'express';
 import cors from 'cors';
 import { initClerk } from './middleware/auth.js';
@@ -17,10 +15,10 @@ app.use(cors({
 app.use(express.json());
 app.use(initClerk);
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'accrue-api' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'supervisd-api' }));
 app.use('/fieldwork', fieldworkRouter);
 app.use('/compliance', complianceRouter);
 
 app.listen(PORT, () => {
-  console.log(`Accrue API running on port ${PORT}`);
+  console.log(`Supervisd API running on port ${PORT}`);
 });
