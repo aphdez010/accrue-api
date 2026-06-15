@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { calcCompliance } from '../services/compliance.js';
-import { requireAuth } from '../auth.js';
-
+import { requireAuth } from '../middleware/auth.js';
 const router = Router();
 
 router.get('/', async (req, res) => {
