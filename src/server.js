@@ -7,6 +7,7 @@ import complianceRouter from './routes/compliance.js';
 import rosterRouter from './routes/roster.js';
 import ceusRouter from './routes/ceus.js';
 import formsRouter from './routes/forms.js';
+import professionalsRouter from './routes/professionals.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -24,6 +25,7 @@ app.use('/compliance', complianceRouter);
 app.use('/roster', rosterRouter);
 app.use('/ceus', ceusRouter);
 app.use('/forms', formsRouter);
+app.use('/professionals', professionalsRouter);
 
 app.listen(PORT, () => {
   console.log(`Supervisd API running on port ${PORT}`);
