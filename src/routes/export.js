@@ -5,10 +5,10 @@ import { requireAuth } from '../middleware/auth.js'
 
 const router = express.Router()
 
-router.get('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth
-    const { month } = req.query
+    const { month, signature } = req.body
 
     const proResult = await pool.query(
       'SELECT * FROM professionals WHERE clerk_user_id = $1',
@@ -145,6 +145,10 @@ router.get('/', requireAuth, async (req, res) => {
 
     const sigY = doc.y
     doc.font('Helvetica-Bold').fontSize(8).fillColor('#5A7A65').text('TRAINEE SIGNATURE', MARGIN, sigY)
+    if (signature) {
+      const sigBuffer = Buffer.from(signature.split(',')[1], 'base64')
+      doc.image(sigBuffer, MARGIN, sigY + 16, { width: 160, height: 40 })
+    }
     doc.rect(MARGIN, sigY+14, 260, 1).fill('#0F2018')
     doc.font('Helvetica').fontSize(8).fillColor('#5A7A65').text(pro.full_name || '', MARGIN, sigY+18)
     doc.font('Helvetica').fontSize(8).fillColor('#9AB5A5').text('Date: ___________________', MARGIN, sigY+30)
