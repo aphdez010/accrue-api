@@ -9,6 +9,7 @@ router.post('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth
     const { month, signature } = req.body
+    console.log('export body:', { month: month || 'none', hasSig: !!signature })
 
     const proResult = await pool.query(
       'SELECT * FROM professionals WHERE clerk_user_id = $1',
@@ -135,7 +136,7 @@ router.post('/', requireAuth, async (req, res) => {
         doc.text(taskStr, cols[6].x+4, rowY+5, { width: cols[6].w })
         doc.text(activityStr, cols[7].x+4, rowY+5, { width: cols[7].w })
         doc.font('Helvetica-Bold').fontSize(8).fillColor(entry.supervised ? '#1A7A50' : '#9AB5A5')
-        doc.text(entry.supervised ? '✓' : '—', cols[8].x, rowY+5, { width: cols[8].w, align: 'center' })
+        doc.text(entry.supervised ? 'Y' : '—', cols[8].x, rowY+5, { width: cols[8].w, align: 'center' })
         doc.y = rowY + 20
       })
     }
