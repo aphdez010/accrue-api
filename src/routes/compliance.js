@@ -7,11 +7,14 @@ const router = Router();
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
+    console.log('Clerk userId from session:', userId);
 
     const { rows: [pro] } = await pool.query(
       'SELECT id FROM professionals WHERE clerk_user_id = $1',
       [userId]
     );
+
+    console.log('Matched professional row:', pro);
 
     if (!pro) return res.status(404).json({ error: 'Professional not found' });
 
@@ -19,6 +22,8 @@ router.get('/', requireAuth, async (req, res) => {
       'SELECT * FROM fieldwork_entries WHERE professional_id = $1',
       [pro.id]
     );
+
+    console.log('Entry count for professional_id', pro.id, ':', entries.length);
 
     res.json(calcCompliance(entries));
   } catch (err) {
