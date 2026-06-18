@@ -1,4 +1,3 @@
-import exportRouter from './routes/export.js'
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -10,7 +9,8 @@ import ceusRouter from './routes/ceus.js';
 import formsRouter from './routes/forms.js';
 import professionalsRouter from './routes/professionals.js';
 import invitesRouter from './routes/invites.js';
-
+import exportRouter from './routes/export.js';
+import vaultRouter from './routes/vault.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -30,7 +30,8 @@ app.use('/ceus', ceusRouter);
 app.use('/forms', formsRouter);
 app.use('/professionals', professionalsRouter);
 app.use('/invites', invitesRouter);
-app.use('/export', exportRouter)
+app.use('/export', exportRouter);
+app.use('/vault', vaultRouter);
 
 app.listen(PORT, () => {
   console.log(`Supervisd API running on port ${PORT}`);
