@@ -20,12 +20,28 @@ router.get('/me', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
+    const { full_name, email, role, credential_number, bacb_pid, agency_name } = req.body;
+
     const existing = await pool.query(
       'SELECT id FROM professionals WHERE clerk_user_id = $1', [userId]
     );
-    if (existing.rows.length > 0) return res.json(existing.rows[0]);
 
-    const { full_name, email, role, credential_number, bacb_pid, agency_name } = req.body;
+    if (existing.rows.length > 0) {
+      const { rows: [pro] } = await pool.query(
+        `UPDATE professionals
+         SET email = COALESCE($2, email),
+             full_name = COALESCE($3, full_name),
+             role = COALESCE($4, role),
+             credential_number = COALESCE($5, credential_number),
+             bacb_pid = COALESCE($6, bacb_pid),
+             agency_name = COALESCE($7, agency_name)
+         WHERE clerk_user_id = $1
+         RETURNING *`,
+        [userId, email || null, full_name || null, role || null, credential_number || null, bacb_pid || null, agency_name || null]
+      );
+      return res.json(pro);
+    }
+
     const { rows: [pro] } = await pool.query(
       `INSERT INTO professionals (clerk_user_id, email, full_name, role, credential_number, bacb_pid, agency_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,

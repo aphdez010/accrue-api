@@ -139,4 +139,78 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 })
 
+// POST /billing/checkout-public — create Stripe checkout session before signup (no auth)
+router.post('/checkout-public', async (req, res) => {
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+      mode: 'subscription',
+      success_url: `${process.env.FRONTEND_URL || 'https://supervisd.com'}/sign-up?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://supervisd.com'}/`,
+    })
+
+    res.json({ url: session.url })
+  } catch (err) {
+    console.error('POST /billing/checkout-public error:', err)
+    res.status(500).json({ error: 'Failed to create checkout session' })
+  }
+})
+
+// POST /billing/link-session — link a paid Stripe checkout session to the newly signed-up account
+router.post('/link-session', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.auth
+    const { session_id } = req.body
+    if (!session_id) return res.status(400).json({ error: 'session_id is required' })
+
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ['customer'],
+    })
+
+    if (session.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Checkout session was not paid' })
+    }
+
+    const customerId = typeof session.customer === 'string' ? session.customer : session.customer.id
+    const subscriptionId = session.subscription
+
+    const existing = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1', [userId]
+    )
+
+    let pro
+    if (existing.rows.length > 0) {
+      const result = await pool.query(
+        `UPDATE professionals
+         SET stripe_customer_id = $2,
+             stripe_subscription_id = $3,
+             subscription_status = 'active'
+         WHERE clerk_user_id = $1
+         RETURNING *`,
+        [userId, customerId, subscriptionId]
+      )
+      pro = result.rows[0]
+    } else {
+      const result = await pool.query(
+        `INSERT INTO professionals (clerk_user_id, stripe_customer_id, stripe_subscription_id, subscription_status)
+         VALUES ($1, $2, $3, 'active')
+         RETURNING *`,
+        [userId, customerId, subscriptionId]
+      )
+      pro = result.rows[0]
+    }
+
+    // Attach clerk_user_id to the Stripe customer for webhook lookups going forward
+    await stripe.customers.update(customerId, {
+      metadata: { clerk_user_id: userId, professional_id: pro.id },
+    })
+
+    res.json(pro)
+  } catch (err) {
+    console.error('POST /billing/link-session error:', err)
+    res.status(500).json({ error: 'Failed to link checkout session' })
+  }
+})
+
 export default router
