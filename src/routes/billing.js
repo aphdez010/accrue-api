@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/auth.js'
 // Clerk user IDs that bypass Stripe subscription checks entirely.
 // GET /billing/status returns 'active' for these IDs without touching the DB.
 const OWNER_BYPASS_IDS = [
-  'user_3FCjOelusSOpjCnU0E6lLWIH2Yo',
+  'user_3FCjOeIusSOpjCnU0E6lLWIH2Yo',
 ]
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
