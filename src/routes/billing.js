@@ -3,6 +3,12 @@ import Stripe from 'stripe'
 import { pool } from '../db/pool.js'
 import { requireAuth } from '../middleware/auth.js'
 
+// Clerk user IDs that bypass Stripe subscription checks entirely.
+// GET /billing/status returns 'active' for these IDs without touching the DB.
+const OWNER_BYPASS_IDS = [
+  'user_3FCjOelusSOpjCnU0E6lLWIH2Yo',
+]
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const router = express.Router()
 
@@ -70,6 +76,11 @@ router.post('/portal', requireAuth, async (req, res) => {
 router.get('/status', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth
+
+    if (OWNER_BYPASS_IDS.includes(userId)) {
+      return res.json({ subscription_status: 'active', stripe_customer_id: null })
+    }
+
     const proResult = await pool.query(
       'SELECT subscription_status, stripe_customer_id FROM professionals WHERE clerk_user_id = $1',
       [userId]
