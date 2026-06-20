@@ -8,8 +8,12 @@ export function calcCompliance(entries) {
   const unrestricted = entries.filter(e => e.experience_type === 'Unrestricted Hours').reduce((sum, e) => sum + Number(e.hours || 0), 0);
   const restricted = entries.filter(e => e.experience_type === 'Restricted Hours').reduce((sum, e) => sum + Number(e.hours || 0), 0);
 
+  const individualHours = entries.filter(e => e.supervised && e.supervision_format === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+  const groupHours = entries.filter(e => e.supervised && e.supervision_format === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+
   const supervisionPct = totalHours > 0 ? (supervisedHours / totalHours) * 100 : 0;
   const restrictedPct = totalHours > 0 ? (restricted / totalHours) * 100 : 0;
+  const individualPct = supervisedHours > 0 ? (individualHours / supervisedHours) * 100 : 0;
 
   // Supervision contacts count this month
   const supervisionContacts = entries.filter(e =>
@@ -20,6 +24,16 @@ export function calcCompliance(entries) {
   const monthlyObservationMet = entries.some(e =>
     e.monthly_observation && String(e.entry_date || '').slice(0, 7) === currentMonth
   );
+
+  // Hours logged this supervisory period (calendar month), checked against 20-130 hour range
+  const currentPeriodHours = entries.filter(e =>
+    String(e.entry_date || '').slice(0, 7) === currentMonth
+  ).reduce((sum, e) => sum + Number(e.hours || 0), 0);
+  const periodHoursMet = currentPeriodHours >= 20 && currentPeriodHours <= 130;
+
+  // Contacts requirement: 4 per supervisory period (Supervised Fieldwork)
+  const REQUIRED_CONTACTS = 4;
+  const contactsMet = supervisionContacts >= REQUIRED_CONTACTS;
 
   // Task list area coverage
   const TASK_AREAS = [
@@ -64,8 +78,15 @@ export function calcCompliance(entries) {
     restricted: round(restricted),
     supervisionPct: round(supervisionPct),
     restrictedPct: round(restrictedPct),
+    individualHours: round(individualHours),
+    groupHours: round(groupHours),
+    individualPct: round(individualPct),
     supervisionMet: supervisionPct >= 5,
-    restrictedMet: restrictedPct <= 50,
+    restrictedMet: restrictedPct <= 40,
+    individualMet: individualPct >= 50,
+    contactsMet,
+    currentPeriodHours: round(currentPeriodHours),
+    periodHoursMet,
     supervisionContacts,
     monthlyObservationMet,
     taskListCoverage,
