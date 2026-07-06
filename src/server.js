@@ -12,6 +12,7 @@ import invitesRouter from './routes/invites.js';
 import exportRouter from './routes/export.js';
 import vaultRouter from './routes/vault.js';
 import billingRouter from './routes/billing.js';
+import bcabaRouter from './routes/bcaba.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -37,6 +38,8 @@ app.use('/invites', invitesRouter);
 app.use('/export', exportRouter);
 app.use('/vault', vaultRouter);
 app.use('/billing', billingRouter);
+app.use('/bcaba', bcabaRouter);
+
 
 app.listen(PORT, () => {
   console.log(`Supervisd API running on port ${PORT}`);
