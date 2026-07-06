@@ -75,7 +75,6 @@ router.get('/status', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth
 
-    console.log('BYPASS_CHECK userId=' + JSON.stringify(userId) + ' inList=' + OWNER_BYPASS_IDS.includes(userId))
 
     if (OWNER_BYPASS_IDS.includes(userId)) {
       return res.json({ subscription_status: 'active', stripe_customer_id: null })
