@@ -13,6 +13,8 @@ import exportRouter from './routes/export.js';
 import vaultRouter from './routes/vault.js';
 import billingRouter from './routes/billing.js';
 import bcabaRouter from './routes/bcaba.js';
+import invoicesRouter from './routes/invoices.js';
+import bcabaMonthlyVerificationRouter from './routes/bcaba-monthly-verification.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -39,6 +41,8 @@ app.use('/export', exportRouter);
 app.use('/vault', vaultRouter);
 app.use('/billing', billingRouter);
 app.use('/bcaba', bcabaRouter);
+app.use('/invoices', invoicesRouter);
+app.use('/bcaba-monthly-verification', bcabaMonthlyVerificationRouter);
 
 
 app.listen(PORT, () => {

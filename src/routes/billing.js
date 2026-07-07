@@ -109,10 +109,17 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       case 'checkout.session.completed': {
         const session = event.data.object
         const professionalId = session.metadata?.professional_id
+        const invoiceId = session.metadata?.invoice_id
         if (professionalId) {
           await pool.query(
             'UPDATE professionals SET subscription_status = $1 WHERE id = $2',
             ['active', professionalId]
+          )
+        }
+        if (invoiceId) {
+          await pool.query(
+            `UPDATE supervision_invoices SET status = 'paid', paid_at = NOW(), stripe_payment_intent_id = $1 WHERE id = $2`,
+            [session.payment_intent, invoiceId]
           )
         }
         break
