@@ -119,3 +119,62 @@ export function combinedTotal(concentratedHours, supervisedHours) {
     meetsRequirement: combined >= BCABA_REQUIREMENTS.supervised.totalHoursRequired,
   };
 }
+
+/**
+ * Builds the aggregated totals for a Final Fieldwork Verification Form (F-FVF)
+ * from a set of already-fetched Monthly Fieldwork Verification (M-FVF) records.
+ *
+ * This is a PURE function — it does not query the database. The route layer is
+ * responsible for fetching the relevant bcaba_monthly_verification rows (filtered
+ * by trainee_id, supervisor_id, and date range) and mapping each row into the
+ * shape expected here before calling this function.
+ *
+ * Expected shape of each item in monthlyRecords (map your DB columns to this):
+ * {
+ *   id: number,                          // bcaba_monthly_verification.id — used to populate the join table
+ *   independentHours: number,
+ *   supervisedHours: number,
+ *   individualSupervisionHours: number,
+ *   groupSupervisionHours: number,
+ *   complianceMet: boolean               // whether this month passed checkMonthlyCompliance() when signed
+ * }
+ *
+ * Returns the fields needed to populate a bcaba_final_verifications row, plus
+ * the list of monthly_verification ids to insert into bcaba_final_verification_months.
+ */
+export function buildFinalVerification(monthlyRecords) {
+  if (!monthlyRecords || monthlyRecords.length === 0) {
+    return { error: 'No monthly verifications provided for this trainee/supervisor/date range' };
+  }
+
+  const totals = monthlyRecords.reduce(
+    (acc, m) => {
+      acc.independent += Number(m.independentHours || 0);
+      acc.supervised += Number(m.supervisedHours || 0);
+      acc.individual += Number(m.individualSupervisionHours || 0);
+      acc.group += Number(m.groupSupervisionHours || 0);
+      return acc;
+    },
+    { independent: 0, supervised: 0, individual: 0, group: 0 }
+  );
+
+  const totalFieldworkHours = totals.independent + totals.supervised;
+  const percentSupervised = totalFieldworkHours > 0
+    ? Number(((totals.supervised / totalFieldworkHours) * 100).toFixed(2))
+    : 0;
+
+  const allMonthlyRequirementsMet = monthlyRecords.every((m) => m.complianceMet === true);
+  const monthlyVerificationIds = monthlyRecords.map((m) => m.id);
+
+  return {
+    total_independent_hours: Math.round(totals.independent * 100) / 100,
+    total_supervised_hours: Math.round(totals.supervised * 100) / 100,
+    total_individual_supervision_hours: Math.round(totals.individual * 100) / 100,
+    total_group_supervision_hours: Math.round(totals.group * 100) / 100,
+    total_fieldwork_hours: Math.round(totalFieldworkHours * 100) / 100,
+    percent_supervised: percentSupervised,
+    all_monthly_requirements_met: allMonthlyRequirementsMet,
+    monthly_verification_ids: monthlyVerificationIds,
+    months_included: monthlyRecords.length,
+  };
+}
