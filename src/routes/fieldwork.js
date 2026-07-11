@@ -33,15 +33,17 @@ router.post('/', requireAuth, async (req, res) => {
     const {
       entry_date, experience_type, hours, supervised, notes,
       activity_description, start_time, end_time, setting,
-      supervision_format, task_list_area, task_list_area_number, monthly_observation
+      supervision_format, task_list_area, task_list_area_number, monthly_observation,
+      entry_sync_type, supervisor_present, supervision_group_type
     } = req.body;
 
     const { rows: [entry] } = await pool.query(
       `INSERT INTO fieldwork_entries
         (professional_id, entry_date, experience_type, hours, supervised, notes,
          activity_description, start_time, end_time, setting,
-         supervision_format, task_list_area, task_list_area_number, monthly_observation)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         supervision_format, task_list_area, task_list_area_number, monthly_observation,
+         entry_sync_type, supervisor_present, supervision_group_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [
         pro.id, entry_date, experience_type, hours,
@@ -49,7 +51,8 @@ router.post('/', requireAuth, async (req, res) => {
         activity_description ?? null, start_time ?? null, end_time ?? null,
         setting ?? null, supervision_format ?? null,
         task_list_area ?? null, task_list_area_number ?? null,
-        monthly_observation ?? false
+        monthly_observation ?? false,
+        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null
       ]
     );
     res.status(201).json(entry);
@@ -76,14 +79,16 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const {
       entry_date, experience_type, hours, supervised, notes,
       activity_description, start_time, end_time, setting,
-      supervision_format, task_list_area, task_list_area_number, monthly_observation
+      supervision_format, task_list_area, task_list_area_number, monthly_observation,
+      entry_sync_type, supervisor_present, supervision_group_type
     } = req.body;
 
     const { rows: [entry] } = await pool.query(
       `UPDATE fieldwork_entries
        SET entry_date = $2, experience_type = $3, hours = $4, supervised = $5, notes = $6,
            activity_description = $7, start_time = $8, end_time = $9, setting = $10,
-           supervision_format = $11, task_list_area = $12, task_list_area_number = $13, monthly_observation = $14
+           supervision_format = $11, task_list_area = $12, task_list_area_number = $13, monthly_observation = $14,
+           entry_sync_type = $15, supervisor_present = $16, supervision_group_type = $17
        WHERE id = $1
        RETURNING *`,
       [
@@ -92,7 +97,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
         activity_description ?? null, start_time ?? null, end_time ?? null,
         setting ?? null, supervision_format ?? null,
         task_list_area ?? null, task_list_area_number ?? null,
-        monthly_observation ?? false
+        monthly_observation ?? false,
+        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null
       ]
     );
     res.json(entry);
@@ -104,9 +110,22 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { rows: [existing] } = await pool.query(
+      'SELECT id FROM fieldwork_entries WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Entry not found' });
+
     await pool.query('DELETE FROM fieldwork_entries WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
