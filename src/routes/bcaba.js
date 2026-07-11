@@ -66,8 +66,12 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
 
   const { id, monthYear } = req.params;
-  const trainee = await pool.query('SELECT fieldwork_type FROM bcaba_trainees WHERE id = $1', [id]);
+  const trainee = await pool.query('SELECT fieldwork_type, user_id, supervisor_id FROM bcaba_trainees WHERE id = $1', [id]);
   if (!trainee.rows[0]) return res.status(404).json({ error: 'Not found' });
+
+  const isOwner = trainee.rows[0].user_id === req.auth.userId;
+  const isSupervisor = trainee.rows[0].supervisor_id === professional.id;
+  if (!isOwner && !isSupervisor) return res.status(403).json({ error: 'Forbidden' });
 
   const entries = await pool.query(
     `SELECT * FROM bcaba_fieldwork_entries
@@ -97,6 +101,17 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
   const adjusted = adjustMonthlyHours(entrySummary);
 
   res.json({ entries: rows, compliance, adjusted, summary: entrySummary });
+});
+
+router.get('/supervisor/trainees', requireAuth, async (req, res) => {
+  const professional = await getProfessionalRole(req.auth.userId);
+  if (!professional) return res.status(403).json({ error: 'Forbidden' });
+
+  const result = await pool.query(
+    'SELECT id, full_name, fieldwork_type, target_hours FROM bcaba_trainees WHERE supervisor_id = $1 ORDER BY full_name',
+    [professional.id]
+  );
+  res.json(result.rows);
 });
 
 router.post('/monthly-verification/:id/sign', requireAuth, async (req, res) => {
