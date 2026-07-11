@@ -49,14 +49,14 @@ router.post('/fieldwork-entries', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
 
-  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent } = req.body;
+  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent } = req.body;
   const loggedByRole = professional.role === 'supervisor' || professional.role === 'owner' ? 'supervisor' : 'trainee';
 
   const result = await pool.query(
     `INSERT INTO bcaba_fieldwork_entries
-      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent]
+      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null]
   );
   res.status(201).json(result.rows[0]);
 });
