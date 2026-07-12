@@ -192,6 +192,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const existing = rows[0];
 
+    const { trainee, supervisor } = await loadTraineeAndSupervisor(existing.trainee_id, existing.supervisor_id);
+    const { userId } = req.auth;
+    if ((!trainee || trainee.user_id !== userId) && (!supervisor || supervisor.supervisor_user_id !== userId)) {
+      return res.status(403).json({ error: 'Not authorized for this F-FVF' });
+    }
+
     if (existing.status !== 'draft') {
       return res.status(400).json({ error: 'Only draft F-FVFs can be edited' });
     }
@@ -312,6 +318,11 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
     const fv = rows[0];
 
     const { trainee, supervisor } = await loadTraineeAndSupervisor(fv.trainee_id, fv.supervisor_id);
+
+    const { userId } = req.auth;
+    if ((!trainee || trainee.user_id !== userId) && (!supervisor || supervisor.supervisor_user_id !== userId)) {
+      return res.status(403).json({ error: 'Not authorized to view this F-FVF' });
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=ffvf-${fv.id}.pdf`);

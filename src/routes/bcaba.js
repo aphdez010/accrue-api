@@ -7,7 +7,7 @@ const router = express.Router();
 
 async function getProfessionalRole(userId) {
   const result = await pool.query(
-    'SELECT id, role FROM professionals WHERE clerk_user_id = $1',
+    'SELECT id, role, full_name FROM professionals WHERE clerk_user_id = $1',
     [userId]
   );
   return result.rows[0] || null;
@@ -29,20 +29,48 @@ router.get('/trainees/:id', requireAuth, async (req, res) => {
   res.json({ trainee: trainee.rows[0], monthly: monthly.rows, progress });
 });
 
+// Creates a trainee AND establishes the Responsible Supervisor relationship
+// in the same request — both bcaba_trainees.supervisor_id (used for the
+// "My Trainees" roster filter) and a matching bcaba_supervisors row (used by
+// every monthly/final verification route) must exist for the workflow to
+// function. Previously neither was ever written, which meant no supervisor
+// could see their roster or touch any verification record.
 router.post('/trainees', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
-if (!professional || !['supervisor', 'owner', 'bcba'].includes(professional.role)) {
-  return res.status(403).json({ error: 'Forbidden' });
+  if (!professional || !['supervisor', 'owner', 'bcba'].includes(professional.role)) {
+    return res.status(403).json({ error: 'Forbidden' });
   }
 
   const { fullName, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours } = req.body;
-  const result = await pool.query(
-    `INSERT INTO bcaba_trainees
-      (user_id, full_name, bacb_account_id, pathway, fieldwork_type, fieldwork_start_date, target_hours)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-    [req.body.userId, fullName, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours]
-  );
-  res.status(201).json(result.rows[0]);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const traineeResult = await client.query(
+      `INSERT INTO bcaba_trainees
+        (user_id, full_name, bacb_account_id, pathway, fieldwork_type, fieldwork_start_date, target_hours, supervisor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [req.body.userId, fullName, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours, professional.id]
+    );
+    const trainee = traineeResult.rows[0];
+
+    const supervisorResult = await client.query(
+      `INSERT INTO bcaba_supervisors
+        (trainee_id, supervisor_user_id, supervisor_name, is_responsible_supervisor)
+       VALUES ($1, $2, $3, true) RETURNING *`,
+      [trainee.id, req.auth.userId, professional.full_name]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ trainee, supervisor: supervisorResult.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /trainees error:', err);
+    res.status(500).json({ error: 'Failed to create trainee' });
+  } finally {
+    client.release();
+  }
 });
 
 router.post('/fieldwork-entries', requireAuth, async (req, res) => {

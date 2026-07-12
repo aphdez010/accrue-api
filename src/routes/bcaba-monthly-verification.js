@@ -8,10 +8,31 @@ const router = express.Router();
 
 function pad(n) { return n < 10 ? '0' + n : String(n); }
 
-async function getBcabaSupervisorId(clerkUserId) {
-  const r = await pool.query('SELECT id FROM bcaba_supervisors WHERE supervisor_user_id = $1', [clerkUserId]);
+// Resolves the bcaba_supervisors.id for a SPECIFIC (user, trainee) pair.
+// bcaba_supervisors is a per-relationship table — one row per trainee a
+// supervisor works with, not one row per supervisor. Previously this
+// function ignored traineeId entirely and returned an arbitrary row, which
+// meant a supervisor with more than one trainee could only ever act on
+// whichever trainee's row happened to come back first, regardless of which
+// trainee they were actually trying to view.
+async function getBcabaSupervisorId(clerkUserId, traineeId) {
+  const r = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE supervisor_user_id = $1 AND trainee_id = $2',
+    [clerkUserId, traineeId]
+  );
   if (r.rows.length === 0) return null;
   return r.rows[0].id;
+}
+
+// Resolves ALL bcaba_supervisors.id rows for this user across every trainee
+// they supervise. Used by routes with no single traineeId in scope (e.g.
+// listing verifications with no query filter).
+async function getAllBcabaSupervisorIds(clerkUserId) {
+  const r = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE supervisor_user_id = $1',
+    [clerkUserId]
+  );
+  return r.rows.map(row => row.id);
 }
 
 // POST /bcaba-monthly-verification/draft
@@ -20,11 +41,11 @@ async function getBcabaSupervisorId(clerkUserId) {
 router.post('/draft', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
-    const supervisorId = await getBcabaSupervisorId(userId);
-    if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user' });
-
     const { traineeId, monthYear } = req.body;
     if (!traineeId || !monthYear) return res.status(400).json({ error: 'traineeId and monthYear are required' });
+
+    const supervisorId = await getBcabaSupervisorId(userId, traineeId);
+    if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user and trainee' });
 
     const existing = await pool.query(
       'SELECT id FROM bcaba_monthly_verification WHERE trainee_id = $1 AND month_year = $2',
@@ -84,21 +105,31 @@ router.post('/draft', requireAuth, async (req, res) => {
 });
 
 // GET /bcaba-monthly-verification?traineeId=1
+// With traineeId: scoped to that specific supervisor-trainee relationship.
+// Without traineeId: returns verifications across every trainee this
+// supervisor works with.
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
-    const supervisorId = await getBcabaSupervisorId(userId);
-    if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user' });
-
     const { traineeId } = req.query;
-    const conditions = ['supervisor_id = $1'];
-    const params = [supervisorId];
-    if (traineeId) { conditions.push('trainee_id = $2'); params.push(traineeId); }
 
-    const result = await pool.query(
-      `SELECT * FROM bcaba_monthly_verification WHERE ${conditions.join(' AND ')} ORDER BY month_year DESC`,
-      params
-    );
+    let result;
+    if (traineeId) {
+      const supervisorId = await getBcabaSupervisorId(userId, traineeId);
+      if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user and trainee' });
+      result = await pool.query(
+        'SELECT * FROM bcaba_monthly_verification WHERE supervisor_id = $1 AND trainee_id = $2 ORDER BY month_year DESC',
+        [supervisorId, traineeId]
+      );
+    } else {
+      const supervisorIds = await getAllBcabaSupervisorIds(userId);
+      if (supervisorIds.length === 0) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user' });
+      result = await pool.query(
+        'SELECT * FROM bcaba_monthly_verification WHERE supervisor_id = ANY($1) ORDER BY month_year DESC',
+        [supervisorIds]
+      );
+    }
+
     res.json({ verifications: result.rows });
   } catch (err) {
     console.error('GET /bcaba-monthly-verification error:', err);
@@ -111,18 +142,18 @@ router.get('/', requireAuth, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
-    const supervisorId = await getBcabaSupervisorId(userId);
-    if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user' });
-
     const { id } = req.params;
     const { contactsCount, observationCompleted } = req.body;
 
-    const existing = await pool.query(
-      'SELECT * FROM bcaba_monthly_verification WHERE id = $1 AND supervisor_id = $2',
-      [id, supervisorId]
-    );
+    const existing = await pool.query('SELECT * FROM bcaba_monthly_verification WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Verification not found' });
-    if (existing.rows[0].status !== 'draft') return res.status(400).json({ error: 'Only draft verifications can be edited' });
+    const record = existing.rows[0];
+
+    const supervisorId = await getBcabaSupervisorId(userId, record.trainee_id);
+    if (!supervisorId || supervisorId !== record.supervisor_id) {
+      return res.status(404).json({ error: 'No BCaBA supervisor record found for this user and trainee' });
+    }
+    if (record.status !== 'draft') return res.status(400).json({ error: 'Only draft verifications can be edited' });
 
     const result = await pool.query(
       `UPDATE bcaba_monthly_verification
