@@ -53,4 +53,22 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
+router.patch('/track', requireAuth, async (req, res) => {
+  try {
+    const { userId } = req.auth;
+    const { track } = req.body;
+    if (!['supervised', 'concentrated'].includes(track)) {
+      return res.status(400).json({ error: 'Invalid track. Must be "supervised" or "concentrated".' });
+    }
+    const { rows: [pro] } = await pool.query(
+      'UPDATE professionals SET bcba_supervision_track = $2 WHERE clerk_user_id = $1 RETURNING *',
+      [userId, track]
+    );
+    if (!pro) return res.status(404).json({ error: 'Not found' });
+    res.json(pro);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

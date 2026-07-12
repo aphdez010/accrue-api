@@ -1,4 +1,7 @@
-export function calcCompliance(entries) {
+import { getBcbaTrackRequirements } from '../routes/bcba-rules.js';
+
+export function calcCompliance(entries, track = 'supervised') {
+  const req = getBcbaTrackRequirements(track);
   const now = new Date();
   const currentMonth = now.toISOString().slice(0, 7);
 
@@ -31,7 +34,7 @@ export function calcCompliance(entries) {
   ).reduce((sum, e) => sum + Number(e.hours || 0), 0);
   const periodHoursMet = currentPeriodHours >= 20 && currentPeriodHours <= 130;
 
-  // Contacts requirement: 4 per supervisory period (Supervised Fieldwork)
+  // Contacts requirement: 4 per supervisory period (shared across both tracks — see bcba-rules.js note)
   const REQUIRED_CONTACTS = 4;
   const contactsMet = supervisionContacts >= REQUIRED_CONTACTS;
 
@@ -49,7 +52,7 @@ export function calcCompliance(entries) {
   }));
   const taskListCoverageCount = coveredAreas.size;
 
-  // Hours pace — projected completion date
+  // Hours pace — projected completion date (target hours now track-aware)
   let projectedCompletionDate = null;
   if (entries.length > 0 && totalHours > 0) {
     const dates = entries.map(e => new Date(e.entry_date)).filter(d => !isNaN(d.getTime()));
@@ -59,18 +62,20 @@ export function calcCompliance(entries) {
       1
     );
     const hoursPerMonth = totalHours / monthsElapsed;
-    const hoursRemaining = Math.max(2000 - totalHours, 0);
+    const hoursRemaining = Math.max(req.totalHoursRequired - totalHours, 0);
     if (hoursPerMonth > 0 && hoursRemaining > 0) {
       const monthsRemaining = hoursRemaining / hoursPerMonth;
       const projected = new Date(now);
       projected.setMonth(projected.getMonth() + Math.ceil(monthsRemaining));
       projectedCompletionDate = projected.toISOString().slice(0, 7);
-    } else if (totalHours >= 2000) {
+    } else if (totalHours >= req.totalHoursRequired) {
       projectedCompletionDate = 'complete';
     }
   }
 
   return {
+    track,
+    totalHoursRequired: req.totalHoursRequired,
     totalHours: round(totalHours),
     supervisedHours: round(supervisedHours),
     independentHours: round(independentHours),
@@ -81,7 +86,7 @@ export function calcCompliance(entries) {
     individualHours: round(individualHours),
     groupHours: round(groupHours),
     individualPct: round(individualPct),
-    supervisionMet: supervisionPct >= 5,
+    supervisionMet: supervisionPct >= (req.supervisionPct * 100),
     restrictedMet: restrictedPct <= 40,
     individualMet: individualPct >= 50,
     contactsMet,
