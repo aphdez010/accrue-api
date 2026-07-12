@@ -34,7 +34,8 @@ router.post('/', requireAuth, async (req, res) => {
       entry_date, experience_type, hours, supervised, notes,
       activity_description, start_time, end_time, setting,
       supervision_format, task_list_area, task_list_area_number, monthly_observation,
-      entry_sync_type, supervisor_present, supervision_group_type
+      entry_sync_type, supervisor_present, supervision_group_type, fieldwork_type,
+      observation_minutes
     } = req.body;
 
     const { rows: [entry] } = await pool.query(
@@ -42,8 +43,9 @@ router.post('/', requireAuth, async (req, res) => {
         (professional_id, entry_date, experience_type, hours, supervised, notes,
          activity_description, start_time, end_time, setting,
          supervision_format, task_list_area, task_list_area_number, monthly_observation,
-         entry_sync_type, supervisor_present, supervision_group_type)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         entry_sync_type, supervisor_present, supervision_group_type, fieldwork_type,
+         observation_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         pro.id, entry_date, experience_type, hours,
@@ -52,7 +54,9 @@ router.post('/', requireAuth, async (req, res) => {
         setting ?? null, supervision_format ?? null,
         task_list_area ?? null, task_list_area_number ?? null,
         monthly_observation ?? false,
-        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null
+        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null,
+        fieldwork_type ?? null,
+        observation_minutes ?? null
       ]
     );
     res.status(201).json(entry);
@@ -80,7 +84,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
       entry_date, experience_type, hours, supervised, notes,
       activity_description, start_time, end_time, setting,
       supervision_format, task_list_area, task_list_area_number, monthly_observation,
-      entry_sync_type, supervisor_present, supervision_group_type
+      entry_sync_type, supervisor_present, supervision_group_type, fieldwork_type,
+      observation_minutes
     } = req.body;
 
     const { rows: [entry] } = await pool.query(
@@ -88,7 +93,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
        SET entry_date = $2, experience_type = $3, hours = $4, supervised = $5, notes = $6,
            activity_description = $7, start_time = $8, end_time = $9, setting = $10,
            supervision_format = $11, task_list_area = $12, task_list_area_number = $13, monthly_observation = $14,
-           entry_sync_type = $15, supervisor_present = $16, supervision_group_type = $17
+           entry_sync_type = $15, supervisor_present = $16, supervision_group_type = $17, fieldwork_type = $18,
+           observation_minutes = $19
        WHERE id = $1
        RETURNING *`,
       [
@@ -98,7 +104,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
         setting ?? null, supervision_format ?? null,
         task_list_area ?? null, task_list_area_number ?? null,
         monthly_observation ?? false,
-        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null
+        entry_sync_type ?? null, supervisor_present ?? null, supervision_group_type ?? null,
+        fieldwork_type ?? null,
+        observation_minutes ?? null
       ]
     );
     res.json(entry);
