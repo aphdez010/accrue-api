@@ -142,6 +142,98 @@ router.get('/supervisor/trainees', requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
+// GET /bcaba/trainees/:id/supervisors — list every supervisor relationship
+// for a trainee (multi-supervisor support). Accessible by the trainee
+// themselves, or by any supervisor already listed on this trainee.
+router.get('/trainees/:id/supervisors', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id } = req.params;
+
+  const trainee = await pool.query('SELECT user_id FROM bcaba_trainees WHERE id = $1', [id]);
+  if (!trainee.rows[0]) return res.status(404).json({ error: 'Trainee not found' });
+
+  const isTrainee = trainee.rows[0].user_id === userId;
+  const supervisors = await pool.query(
+    'SELECT * FROM bcaba_supervisors WHERE trainee_id = $1 ORDER BY is_responsible_supervisor DESC, supervisor_name ASC',
+    [id]
+  );
+  const isListedSupervisor = supervisors.rows.some(s => s.supervisor_user_id === userId);
+
+  if (!isTrainee && !isListedSupervisor) return res.status(403).json({ error: 'Forbidden' });
+
+  res.json({ supervisors: supervisors.rows });
+});
+
+// POST /bcaba/trainees/:id/supervisors — add an additional (non-responsible)
+// supervisor to a trainee. Only the current Responsible Supervisor can add
+// contributing supervisors, matching BACB's accountability model.
+// Body: { supervisorName, supervisorUserId?, bacbAccountId? }
+router.post('/trainees/:id/supervisors', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id } = req.params;
+  const { supervisorName, supervisorUserId, bacbAccountId } = req.body;
+  if (!supervisorName) return res.status(400).json({ error: 'supervisorName is required' });
+
+  const responsibleCheck = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE trainee_id = $1 AND supervisor_user_id = $2 AND is_responsible_supervisor = true',
+    [id, userId]
+  );
+  if (responsibleCheck.rows.length === 0) {
+    return res.status(403).json({ error: 'Only the Responsible Supervisor can add additional supervisors' });
+  }
+
+  const result = await pool.query(
+    `INSERT INTO bcaba_supervisors
+      (trainee_id, supervisor_user_id, supervisor_name, bacb_account_id, is_responsible_supervisor)
+     VALUES ($1, $2, $3, $4, false) RETURNING *`,
+    [id, supervisorUserId ?? null, supervisorName, bacbAccountId ?? null]
+  );
+  res.status(201).json(result.rows[0]);
+});
+
+// PATCH /bcaba/trainees/:id/supervisors/:supervisorId/make-responsible
+// Reassigns the Responsible Supervisor for a trainee — clears the flag on
+// whoever currently holds it and sets it on the target, in one transaction.
+router.patch('/trainees/:id/supervisors/:supervisorId/make-responsible', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id, supervisorId } = req.params;
+
+  const responsibleCheck = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE trainee_id = $1 AND supervisor_user_id = $2 AND is_responsible_supervisor = true',
+    [id, userId]
+  );
+  if (responsibleCheck.rows.length === 0) {
+    return res.status(403).json({ error: 'Only the current Responsible Supervisor can reassign this role' });
+  }
+
+  const target = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE id = $1 AND trainee_id = $2',
+    [supervisorId, id]
+  );
+  if (target.rows.length === 0) return res.status(404).json({ error: 'Supervisor not found on this trainee' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'UPDATE bcaba_supervisors SET is_responsible_supervisor = false WHERE trainee_id = $1',
+      [id]
+    );
+    const updated = await client.query(
+      'UPDATE bcaba_supervisors SET is_responsible_supervisor = true WHERE id = $1 RETURNING *',
+      [supervisorId]
+    );
+    await client.query('COMMIT');
+    res.json(updated.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PATCH make-responsible error:', err);
+    res.status(500).json({ error: 'Failed to reassign Responsible Supervisor' });
+  } finally {
+    client.release();
+  }
+});
+
 router.post('/monthly-verification/:id/sign', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
