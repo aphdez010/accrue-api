@@ -73,4 +73,47 @@ router.patch('/:id/contract', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /supervisors/:id/make-responsible
+// Reassigns the Responsible Supervisor for the logged-in trainee — clears
+// the flag on whoever currently holds it and sets it on the target, in one
+// transaction. Mirrors the same pattern used on the BCaBA side.
+router.patch('/:id/make-responsible', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { rows: [target] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!target) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'UPDATE supervisors SET is_responsible = false WHERE professional_id = $1',
+        [pro.id]
+      );
+      const { rows: [updated] } = await client.query(
+        'UPDATE supervisors SET is_responsible = true WHERE id = $1 RETURNING *',
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      res.json(updated);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/make-responsible error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
