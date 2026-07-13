@@ -33,25 +33,47 @@ router.get('/trainees/:id', requireAuth, async (req, res) => {
 // in the same request — both bcaba_trainees.supervisor_id (used for the
 // "My Trainees" roster filter) and a matching bcaba_supervisors row (used by
 // every monthly/final verification route) must exist for the workflow to
-// function. Previously neither was ever written, which meant no supervisor
-// could see their roster or touch any verification record.
+// function.
+//
+// Trainees must already have a Supervisd account (created via normal
+// sign-up) before a supervisor can add them — we resolve the trainee's
+// account server-side by email rather than trusting a client-supplied
+// userId, which was a latent trust gap in the original implementation.
 router.post('/trainees', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional || !['supervisor', 'owner', 'bcba'].includes(professional.role)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const { fullName, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours } = req.body;
+  const { traineeEmail, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours } = req.body;
+  if (!traineeEmail) return res.status(400).json({ error: 'traineeEmail is required' });
+
+  const { rows: [traineeAccount] } = await pool.query(
+    'SELECT clerk_user_id, full_name FROM professionals WHERE LOWER(email) = LOWER($1)',
+    [traineeEmail]
+  );
+  if (!traineeAccount) {
+    return res.status(404).json({ error: 'No Supervisd account found for that email. The trainee needs to sign up first.' });
+  }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
+    const existingTrainee = await client.query(
+      'SELECT id FROM bcaba_trainees WHERE user_id = $1',
+      [traineeAccount.clerk_user_id]
+    );
+    if (existingTrainee.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This person is already registered as a BCaBA trainee' });
+    }
+
     const traineeResult = await client.query(
       `INSERT INTO bcaba_trainees
         (user_id, full_name, bacb_account_id, pathway, fieldwork_type, fieldwork_start_date, target_hours, supervisor_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [req.body.userId, fullName, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours, professional.id]
+      [traineeAccount.clerk_user_id, traineeAccount.full_name, bacbAccountId, pathway, fieldworkType, fieldworkStartDate, targetHours, professional.id]
     );
     const trainee = traineeResult.rows[0];
 

@@ -1,31 +1,45 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
-
 const router = Router();
-
-router.get('/me', requireAuth, async (req, res) => {
+router.get('/me', requireAuth, async (req, res) =>{
   try {
     const { userId } = req.auth;
     const { rows: [pro] } = await pool.query(
       'SELECT * FROM professionals WHERE clerk_user_id = $1', [userId]
     );
-    if (!pro) return res.status(404).json({ error: 'Not found' });
+    if (!pro) return res.status(404).json({ error:'Not found' });
     res.json(pro);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
+// GET /professionals/lookup?email=... — used when a supervisor needs to
+// attach an existing Supervisd account to a new trainee/roster record.
+// Returns only minimal, non-sensitive fields — never the clerk_user_id
+// directly to the client; callers that need to link an account (e.g.
+// trainee creation) resolve it server-side from this same email instead.
+router.get('/lookup', requireAuth, async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: 'email is required' });
+    const { rows: [pro] } = await pool.query(
+      'SELECT id, full_name, email, role FROM professionals WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+    if (!pro) return res.status(404).json({ error: 'No Supervisd account found for that email' });
+    res.json(pro);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.post('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
     const { full_name, email, role, credential_number, bacb_pid, agency_name } = req.body;
-
     const existing = await pool.query(
       'SELECT id FROM professionals WHERE clerk_user_id = $1', [userId]
     );
-
     if (existing.rows.length > 0) {
       const { rows: [pro] } = await pool.query(
         `UPDATE professionals
@@ -37,13 +51,12 @@ router.post('/', requireAuth, async (req, res) => {
              agency_name = COALESCE($7, agency_name)
          WHERE clerk_user_id = $1
          RETURNING *`,
-        [userId, email || null, full_name || null, role || null, credential_number || null, bacb_pid || null, agency_name || null]
+        [userId, email || null, full_name || null,role || null, credential_number || null, bacb_pid || null, agency_name || null]
       );
       return res.json(pro);
     }
-
     const { rows: [pro] } = await pool.query(
-      `INSERT INTO professionals (clerk_user_id, email, full_name, role, credential_number, bacb_pid, agency_name)
+      `INSERT INTO professionals (clerk_user_id, email, full_name, role, credential_number, bacb_pid,agency_name)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [userId, email, full_name, role || 'rbt', credential_number || null, bacb_pid || null, agency_name || null]
     );
@@ -52,7 +65,6 @@ router.post('/', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 router.patch('/track', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
@@ -64,11 +76,10 @@ router.patch('/track', requireAuth, async (req, res) => {
       'UPDATE professionals SET bcba_supervision_track = $2 WHERE clerk_user_id = $1 RETURNING *',
       [userId, track]
     );
-    if (!pro) return res.status(404).json({ error: 'Not found' });
+    if (!pro) return res.status(404).json({ error:'Not found' });
     res.json(pro);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
 export default router;
