@@ -176,7 +176,11 @@ router.get('/trainees/:id/supervisors', requireAuth, async (req, res) => {
 
   const isTrainee = trainee.rows[0].user_id === userId;
   const supervisors = await pool.query(
-    'SELECT * FROM bcaba_supervisors WHERE trainee_id = $1 ORDER BY is_responsible_supervisor DESC, supervisor_name ASC',
+    `SELECT s.*, vd.file_name AS contract_file_name, vd.file_url AS contract_file_url
+     FROM bcaba_supervisors s
+     LEFT JOIN vault_documents vd ON vd.id = s.contract_document_id
+     WHERE s.trainee_id = $1
+     ORDER BY s.is_responsible_supervisor DESC, s.supervisor_name ASC`,
     [id]
   );
   const isListedSupervisor = supervisors.rows.some(s => s.supervisor_user_id === userId);
@@ -254,6 +258,47 @@ router.patch('/trainees/:id/supervisors/:supervisorId/make-responsible', require
   } finally {
     client.release();
   }
+});
+
+// PATCH /bcaba/trainees/:id/supervisors/:supervisorId/contract
+// Attaches a supervision contract document (already uploaded via
+// POST /vault/upload with category 'supervision_contract') to a specific
+// supervisor relationship. A supervisor may only attach a contract to their
+// own row — the vault document must also belong to their own account,
+// matching the same "contracts live in the uploading supervisor's vault"
+// convention used on the BCBA side.
+// Body: { vaultDocumentId, contractSignedDate }
+router.patch('/trainees/:id/supervisors/:supervisorId/contract', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id, supervisorId } = req.params;
+  const { vaultDocumentId, contractSignedDate } = req.body;
+  if (!vaultDocumentId) return res.status(400).json({ error: 'vaultDocumentId is required' });
+
+  const supervisorRow = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE id = $1 AND trainee_id = $2 AND supervisor_user_id = $3',
+    [supervisorId, id, userId]
+  );
+  if (supervisorRow.rows.length === 0) {
+    return res.status(403).json({ error: 'You can only attach a contract to your own supervisor record' });
+  }
+
+  const professional = await getProfessionalRole(userId);
+  if (!professional) return res.status(403).json({ error: 'Forbidden' });
+
+  const doc = await pool.query(
+    'SELECT id FROM vault_documents WHERE id = $1 AND professional_id = $2',
+    [vaultDocumentId, professional.id]
+  );
+  if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found in your vault' });
+
+  const updated = await pool.query(
+    `UPDATE bcaba_supervisors
+     SET contract_document_id = $1, contract_signed_date = COALESCE($2, contract_signed_date)
+     WHERE id = $3
+     RETURNING *`,
+    [vaultDocumentId, contractSignedDate || null, supervisorId]
+  );
+  res.json(updated.rows[0]);
 });
 
 router.post('/monthly-verification/:id/sign', requireAuth, async (req, res) => {

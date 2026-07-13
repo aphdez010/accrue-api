@@ -16,6 +16,7 @@ import bcabaRouter from './routes/bcaba.js';
 import invoicesRouter from './routes/invoices.js';
 import bcabaMonthlyVerificationRouter from './routes/bcaba-monthly-verification.js';
 import bcabaFinalVerificationRouter from './routes/bcaba-final-verification.js';
+import supervisorsRouter from './routes/supervisors.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -45,6 +46,7 @@ app.use('/bcaba', bcabaRouter);
 app.use('/invoices', invoicesRouter);
 app.use('/bcaba-monthly-verification', bcabaMonthlyVerificationRouter);
 app.use('/bcaba-final-verification', bcabaFinalVerificationRouter);
+app.use('/supervisors', supervisorsRouter);
 
 
 app.listen(PORT, () => {
