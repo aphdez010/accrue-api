@@ -301,6 +301,31 @@ router.patch('/trainees/:id/supervisors/:supervisorId/contract', requireAuth, as
   res.json(updated.rows[0]);
 });
 
+// PATCH /bcaba/trainees/:id/supervisors/:supervisorId/training
+// Records the date a supervisor completed the BACB-required 8-hour
+// Supervisor Training. A supervisor may only set this on their own row.
+// Body: { trainingDate }
+router.patch('/trainees/:id/supervisors/:supervisorId/training', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id, supervisorId } = req.params;
+  const { trainingDate } = req.body;
+  if (!trainingDate) return res.status(400).json({ error: 'trainingDate is required' });
+
+  const supervisorRow = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE id = $1 AND trainee_id = $2 AND supervisor_user_id = $3',
+    [supervisorId, id, userId]
+  );
+  if (supervisorRow.rows.length === 0) {
+    return res.status(403).json({ error: 'You can only record training for your own supervisor record' });
+  }
+
+  const updated = await pool.query(
+    `UPDATE bcaba_supervisors SET supervisor_training_date = $1 WHERE id = $2 RETURNING *`,
+    [trainingDate, supervisorId]
+  );
+  res.json(updated.rows[0]);
+});
+
 router.post('/monthly-verification/:id/sign', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });

@@ -73,6 +73,40 @@ router.patch('/:id/contract', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /supervisors/:id/training — records the date a supervisor completed
+// the BACB-required 8-hour Supervisor Training (based on the Supervisor
+// Training Curriculum Outline 2.0), which must be completed before they can
+// provide fieldwork supervision. Unlike a contract, no document upload is
+// required — the date itself is the compliance-relevant fact.
+// Body: { trainingDate }
+router.patch('/:id/training', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { trainingDate } = req.body;
+    if (!trainingDate) return res.status(400).json({ error: 'trainingDate is required' });
+
+    const { rows: [existingSupervisor] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existingSupervisor) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE supervisors SET supervisor_training_date = $1 WHERE id = $2 RETURNING *`,
+      [trainingDate, req.params.id]
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/training error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /supervisors/:id/make-responsible
 // Reassigns the Responsible Supervisor for the logged-in trainee — clears
 // the flag on whoever currently holds it and sets it on the target, in one
