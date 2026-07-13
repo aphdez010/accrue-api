@@ -1,17 +1,20 @@
 // BCBA Supervised Fieldwork track requirements
-// Source: BACB Board Certified Behavior Analyst Handbook, updated 06/2026 (rev effective
-// current cycle) and the BCBA 2027 Eligibility Requirements section of the same handbook.
+// Source: BACB Board Certified Behavior Analyst Handbook, updated 02/2026, and
+// BACB's "Guidance for Meeting the BCBA Requirements During the 2027 Transition"
+// (Updated 01/2026).
 //
 // Two rule sets are maintained because the BACB's 2027 changes apply only to trainees
 // whose fieldwork clock starts on/after Jan 1, 2027 — trainees already accruing hours
 // stay on the current rules for the duration of that fieldwork experience. Do NOT collapse
 // this into a single rule set or gate it on "today's date"; gate it on fieldworkStartDate.
 //
-// VERIFY BEFORE SHIP: contactsPerMonth in BCBA_RULES_2027 is inferred from BCBA_RULES_2022
-// (4 supervised / 6 concentrated), NOT explicitly restated in the 2027 handbook table
-// (p.25-28), which only lists hours/period, observation minutes, and supervision %.
-// Cross-check against BACB's "Guidance for Meeting the BCBA Requirements During the
-// 2027 Transition" doc before treating this as production-accurate.
+// CONFIRMED 07/2026: the 2027 requirements eliminate the monthly supervision-contacts
+// count entirely — this is a genuine BACB policy change, not an oversight. Per the
+// BACB's own 2027 Transition Guidance: "The 2027 requirements shift from
+// contact-focused to duration-focused tracking." Only percentage-of-hours-supervised
+// and observation-duration requirements apply under 2027; there is no minimum number
+// of monthly meetings. contactsPerMonth is therefore null for both 2027 tracks, and
+// adjustMonthlyHours() must skip the contacts-proration step when it's null.
 export const BCBA_RULES_2022 = {
   supervised: {
     totalHoursRequired: 2000,
@@ -36,7 +39,7 @@ export const BCBA_RULES_2027 = {
   supervised: {
     totalHoursRequired: 2000,
     supervisionPct: 0.05,
-    contactsPerMonth: 4, // UNVERIFIED for 2027 — see file header note
+    contactsPerMonth: null, // eliminated under 2027 — see file header note
     hoursPerPeriod: { min: 20, max: 160 },
     observationRequirement: { type: 'minutes', value: 60, cumulative: true },
     individualSupervisionMinPct: 0.5,
@@ -45,7 +48,7 @@ export const BCBA_RULES_2027 = {
   concentrated: {
     totalHoursRequired: 1500,
     supervisionPct: 0.075,
-    contactsPerMonth: 6, // UNVERIFIED for 2027 — see file header note
+    contactsPerMonth: null, // eliminated under 2027 — see file header note
     hoursPerPeriod: { min: 20, max: 160 },
     observationRequirement: { type: 'minutes', value: 90, cumulative: true },
     individualSupervisionMinPct: 0.5,
@@ -167,8 +170,10 @@ export function adjustMonthlyHours(month, rules) {
     reasons.push('group_trimmed_to_individual');
   }
   // 5. Not enough supervisor-trainee contacts → prorate total hours by the
-  //    fraction of required contacts that actually occurred.
-  if (month.contactsOccurred < rules.contactsPerMonth) {
+  //    fraction of required contacts that actually occurred. Skipped entirely
+  //    when rules.contactsPerMonth is null — the 2027 rule set has no contacts
+  //    requirement at all (see file header note).
+  if (rules.contactsPerMonth != null && month.contactsOccurred < rules.contactsPerMonth) {
     const contactRatio = month.contactsOccurred / rules.contactsPerMonth;
     totalHours = Math.floor(totalHours * contactRatio);
     reasons.push('prorated_for_contacts');

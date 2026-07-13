@@ -46,8 +46,10 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
 
     // Contact count is currently inferred as "number of supervised entries
     // logged this month" — same proxy the old code used. This is only as
-    // accurate as trainees logging one entry per actual contact. If contacts
-    // and hours end up logged as separate concepts later, swap this out.
+    // accurate as trainees logging one entry per actual contact. Only
+    // meaningful under 2022 rules; the 2027 rule set has no contacts
+    // requirement at all (rules.contactsPerMonth is null), so this value
+    // is computed but simply unused by adjustMonthlyHours() in that case.
     const contactsOccurred = monthEntries.filter(e => e.supervised).length;
     const observationOccurred = monthEntries.some(e => e.monthly_observation);
     // Cumulative minutes across the month's entries — only meaningful under
@@ -62,10 +64,11 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
 
     if (track === 'concentrated') {
       const raw = monthIndependent + monthIndividual + monthGroup;
+      const contactsRequirementMet = rules.contactsPerMonth == null || contactsOccurred >= rules.contactsPerMonth;
       const compliant = observationMet
         && raw >= rules.hoursPerPeriod.min
         && raw <= rules.hoursPerPeriod.max
-        && contactsOccurred >= rules.contactsPerMonth
+        && contactsRequirementMet
         && monthGroup <= monthIndividual
         && (monthIndividual + monthGroup) / raw >= rules.supervisionPct;
 
@@ -102,7 +105,9 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
   const supervisionContacts = entries.filter(e =>
     e.supervised && toMonthKey(e.entry_date) === currentMonth
   ).length;
-  const contactsMet = supervisionContacts >= rules.contactsPerMonth;
+  // Under 2027 rules there's no contacts requirement at all — treat as met
+  // automatically rather than comparing against a null threshold.
+  const contactsMet = rules.contactsPerMonth == null || supervisionContacts >= rules.contactsPerMonth;
 
   const currentMonthObservationMinutes = entries
     .filter(e => toMonthKey(e.entry_date) === currentMonth)
