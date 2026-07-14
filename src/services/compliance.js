@@ -44,18 +44,22 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
     const monthIndividual = monthEntries.filter(e => e.supervised && e.supervision_format === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
     const monthGroup = monthEntries.filter(e => e.supervised && e.supervision_format === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
 
-    // Contact count is currently inferred as "number of supervised entries
-    // logged this month" — same proxy the old code used. This is only as
-    // accurate as trainees logging one entry per actual contact. Only
-    // meaningful under 2022 rules; the 2027 rule set has no contacts
-    // requirement at all (rules.contactsPerMonth is null), so this value
-    // is computed but simply unused by adjustMonthlyHours() in that case.
-    const contactsOccurred = monthEntries.filter(e => e.supervised).length;
+    // Contact count only includes SYNCHRONIZED supervised entries. Per BACB
+    // guidance: a supervisor reviewing a recorded/asynchronous session
+    // without live discussion can count toward the observation-with-client
+    // requirement, but NOT toward the supervisor-trainee contact count or
+    // total supervised hours requirement. Only a synchronous session (live,
+    // even if remote) — where the supervisor and trainee are actually
+    // interacting and discussing the session — counts as a contact.
+    const contactsOccurred = monthEntries.filter(e => e.supervised && e.entry_sync_type === 'Synchronized').length;
     const observationOccurred = monthEntries.some(e => e.monthly_observation);
     // Cumulative minutes across the month's entries — only meaningful under
     // 2027 rules (rules.observationRequirement.type === 'minutes'), but
     // computed unconditionally since it's cheap and adjustMonthlyHours()
-    // decides which field to use based on the active rule set.
+    // decides which field to use based on the active rule set. Unlike
+    // contacts, observation minutes are NOT restricted to synchronized
+    // entries — a recorded observation still counts toward the
+    // observation-with-client requirement per the same BACB guidance.
     const observationMinutes = monthEntries.reduce((sum, e) => sum + Number(e.observation_minutes || 0), 0);
     const obsReq = rules.observationRequirement;
     const observationMet = obsReq.type === 'minutes'
@@ -102,8 +106,10 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
   const currentPeriodHours = currentMonthData?.rawHours ?? 0;
   const periodHoursMet = currentPeriodHours >= rules.hoursPerPeriod.min && currentPeriodHours <= rules.hoursPerPeriod.max;
 
+  // Only synchronized supervised entries count as a supervisor-trainee
+  // contact — see the file-level note in monthlyBreakdown above.
   const supervisionContacts = entries.filter(e =>
-    e.supervised && toMonthKey(e.entry_date) === currentMonth
+    e.supervised && e.entry_sync_type === 'Synchronized' && toMonthKey(e.entry_date) === currentMonth
   ).length;
   // Under 2027 rules there's no contacts requirement at all — treat as met
   // automatically rather than comparing against a null threshold.
