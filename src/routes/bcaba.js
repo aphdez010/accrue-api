@@ -13,6 +13,20 @@ async function getProfessionalRole(userId) {
   return result.rows[0] || null;
 }
 
+// GET /bcaba/me — resolves the calling user's own bcaba_trainees record by
+// their Clerk user id. Needed because bcaba_trainees.id is NOT the same as
+// professionals.id — they're separate tables linked by user_id, not by
+// matching primary keys. Use this (not professionals.id) whenever the
+// frontend needs "my own trainee id" for calls like
+// /bcaba/trainees/:id/supervisors, /bcaba/trainees/:id/monthly/:monthYear,
+// or as the traineeId in POST /bcaba/fieldwork-entries.
+router.get('/me', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const trainee = await pool.query('SELECT * FROM bcaba_trainees WHERE user_id = $1', [userId]);
+  if (!trainee.rows[0]) return res.status(404).json({ error: 'No BCaBA trainee record found for your account' });
+  res.json(trainee.rows[0]);
+});
+
 router.get('/trainees/:id', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
@@ -99,14 +113,14 @@ router.post('/fieldwork-entries', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
 
-  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent } = req.body;
+  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber } = req.body;
   const loggedByRole = professional.role === 'supervisor' || professional.role === 'owner' ? 'supervisor' : 'trainee';
 
   const result = await pool.query(
     `INSERT INTO bcaba_fieldwork_entries
-      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
-    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null]
+      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present, activity_description, task_list_area, task_list_area_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null]
   );
   res.status(201).json(result.rows[0]);
 });
