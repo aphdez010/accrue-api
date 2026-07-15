@@ -25,5 +25,40 @@ await pool.query(`
   );
 `);
 
+// BCaBA: per-entry fieldwork type, so trainees can mix Supervised + Concentrated
+// fieldwork per the Handbook's "Combining Fieldwork Types" allowance. Previously
+// fixed once per-trainee at onboarding via bcaba_trainees.fieldwork_type, which
+// is retained as the trainee's default/primary track.
+await pool.query(`
+  ALTER TABLE bcaba_fieldwork_entries
+  ADD COLUMN IF NOT EXISTS fieldwork_type TEXT NOT NULL DEFAULT 'supervised';
+`);
+
+// Supervisor qualifications: certification date + consulting supervisor, per
+// Handbook "Supervisor Qualifications" (a supervisor certified less than one
+// year must receive monthly consultation from a qualified consulting
+// supervisor). Added to both the BCBA and BCaBA supervisors tables.
+await pool.query(`
+  ALTER TABLE supervisors
+  ADD COLUMN IF NOT EXISTS supervisor_certification_date DATE,
+  ADD COLUMN IF NOT EXISTS consulting_supervisor_name TEXT,
+  ADD COLUMN IF NOT EXISTS consulting_supervisor_last_consultation_date DATE;
+`);
+await pool.query(`
+  ALTER TABLE bcaba_supervisors
+  ADD COLUMN IF NOT EXISTS supervisor_certification_date DATE,
+  ADD COLUMN IF NOT EXISTS consulting_supervisor_name TEXT,
+  ADD COLUMN IF NOT EXISTS consulting_supervisor_last_consultation_date DATE;
+`);
+
+// Professionals: certification + recertification cycle dates, needed to compute
+// CEU compliance (32 total / 4 ethics / 3 supervision per 2-year cycle) and to
+// know whether a BCBA is in their first year of certification (see above).
+await pool.query(`
+  ALTER TABLE professionals
+  ADD COLUMN IF NOT EXISTS certification_date DATE,
+  ADD COLUMN IF NOT EXISTS recertification_date DATE;
+`);
+
 console.log('Migration complete');
 await pool.end();
