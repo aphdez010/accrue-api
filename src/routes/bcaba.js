@@ -114,7 +114,7 @@ router.post('/fieldwork-entries', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
 
-  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
+  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, entrySyncType, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
   const loggedByRole = professional.role === 'supervisor' || professional.role === 'owner' ? 'supervisor' : 'trainee';
 
   // fieldworkType lets a trainee tag this specific entry as Supervised or
@@ -129,9 +129,9 @@ router.post('/fieldwork-entries', requireAuth, async (req, res) => {
 
   const result = await pool.query(
     `INSERT INTO bcaba_fieldwork_entries
-      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present, activity_description, task_list_area, task_list_area_number, fieldwork_type)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
-    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, resolvedFieldworkType]
+      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, entry_sync_type, activity_description, task_list_area, task_list_area_number, fieldwork_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, entrySyncType ?? null, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, resolvedFieldworkType]
   );
   res.status(201).json(result.rows[0]);
 });
@@ -149,19 +149,19 @@ router.patch('/fieldwork-entries/:id', requireAuth, async (req, res) => {
   const isSupervisor = trainee?.supervisor_id === professional.id;
   if (!isOwner && !isSupervisor) return res.status(403).json({ error: 'Forbidden' });
 
-  const { entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
+  const { entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, entrySyncType, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
 
   const result = await pool.query(
     `UPDATE bcaba_fieldwork_entries SET
        entry_date = COALESCE($1, entry_date), entry_type = COALESCE($2, entry_type),
        hours = COALESCE($3, hours), activity_category = COALESCE($4, activity_category),
        supervision_format = COALESCE($5, supervision_format), notes = $6,
-       restriction_type = COALESCE($7, restriction_type), client_present = COALESCE($8, client_present),
-       entry_sync_type = COALESCE($9, entry_sync_type), supervisor_present = COALESCE($10, supervisor_present),
-       activity_description = $11, task_list_area = $12, task_list_area_number = $13,
-       fieldwork_type = COALESCE($14, fieldwork_type)
-     WHERE id = $15 RETURNING *`,
-    [entryDate, entryType, hours, activityCategory, supervisionFormat, notes ?? null, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, fieldworkType, id]
+       restriction_type = COALESCE($7, restriction_type),
+       entry_sync_type = COALESCE($8, entry_sync_type),
+       activity_description = $9, task_list_area = $10, task_list_area_number = $11,
+       fieldwork_type = COALESCE($12, fieldwork_type)
+     WHERE id = $13 RETURNING *`,
+    [entryDate, entryType, hours, activityCategory, supervisionFormat, notes ?? null, restrictionType, entrySyncType, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, fieldworkType, id]
   );
   res.json(result.rows[0]);
 });
@@ -223,10 +223,9 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
     const unrestrictedHours = subset.filter(r => r.restriction_type === 'unrestricted').reduce((s, r) => s + Number(r.hours), 0);
     const restrictedHours = subset.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);
     const unrestrictedPct = totalHours > 0 ? unrestrictedHours / totalHours : 0;
-    const clientPresentHours = subset.filter(r => r.client_present === true).reduce((s, r) => s + Number(r.hours), 0);
     const summary = {
       fieldworkType, totalHours, supervisedHours, individualHours, groupHours, contactsCount, observationCompleted,
-      unrestrictedHours, restrictedHours, unrestrictedPct, clientPresentHours,
+      unrestrictedHours, restrictedHours, unrestrictedPct,
     };
     return { summary, compliance: checkMonthlyCompliance(summary), adjusted: adjustMonthlyHours(summary) };
   }
