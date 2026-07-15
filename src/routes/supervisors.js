@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { computeSupervisorQualification } from './supervisor-qualifications.js';
 
 const router = Router();
 
 // GET /supervisors — list the logged-in trainee's own BCBA-side supervisor
-// records, including contract status.
+// records, including contract status and computed qualification status (per
+// the Handbook's Supervisor Qualifications rule: certified <1 year requires
+// an active, currently-consulted consulting supervisor relationship).
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { rows: [pro] } = await pool.query(
@@ -22,9 +25,50 @@ router.get('/', requireAuth, async (req, res) => {
        ORDER BY s.is_responsible DESC, s.supervisor_name ASC`,
       [pro.id]
     );
-    res.json({ supervisors: rows });
+    const withQualification = rows.map((s) => ({ ...s, qualification: computeSupervisorQualification(s) }));
+    res.json({ supervisors: withQualification });
   } catch (err) {
     console.error('GET /supervisors error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /supervisors/:id/qualifications — records a supervisor's own BCBA
+// certification date and, if they're in their first year of certification,
+// their consulting supervisor's name and the date of their most recent
+// monthly consultation. Per Handbook Supervisor Qualifications: a supervisor
+// certified less than one year must receive monthly consultation from a
+// qualified consulting supervisor to be eligible to provide fieldwork
+// supervision at all.
+// Body: { certificationDate, consultingSupervisorName, consultingSupervisorLastConsultationDate }
+router.patch('/:id/qualifications', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { certificationDate, consultingSupervisorName, consultingSupervisorLastConsultationDate } = req.body;
+
+    const { rows: [existingSupervisor] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existingSupervisor) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE supervisors
+       SET supervisor_certification_date = COALESCE($1, supervisor_certification_date),
+           consulting_supervisor_name = $2,
+           consulting_supervisor_last_consultation_date = $3
+       WHERE id = $4
+       RETURNING *`,
+      [certificationDate || null, consultingSupervisorName || null, consultingSupervisorLastConsultationDate || null, req.params.id]
+    );
+    res.json({ ...updated, qualification: computeSupervisorQualification(updated) });
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/qualifications error:', err);
     res.status(500).json({ error: err.message });
   }
 });

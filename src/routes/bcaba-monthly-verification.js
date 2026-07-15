@@ -41,18 +41,28 @@ async function getAllBcabaSupervisorIds(clerkUserId) {
 router.post('/draft', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
-    const { traineeId, monthYear } = req.body;
+    const { traineeId, monthYear, fieldworkType: requestedFieldworkType } = req.body;
     if (!traineeId || !monthYear) return res.status(400).json({ error: 'traineeId and monthYear are required' });
 
     const supervisorId = await getBcabaSupervisorId(userId, traineeId);
     if (!supervisorId) return res.status(404).json({ error: 'No BCaBA supervisor record found for this user and trainee' });
 
+    const traineeResult = await pool.query('SELECT fieldwork_type FROM bcaba_trainees WHERE id = $1', [traineeId]);
+    if (traineeResult.rows.length === 0) return res.status(404).json({ error: 'Trainee not found' });
+    // fieldworkType may be requested explicitly — a trainee who mixed Supervised
+    // and Concentrated hours in one month needs a separate M-FVF per type, each
+    // checked against that type's own rules (they can't be combined into one
+    // form; see Handbook "Please complete one form per supervisor, per
+    // fieldwork type"). Defaults to the trainee's primary track when omitted,
+    // preserving prior behavior for trainees who never mix types.
+    const fieldworkType = requestedFieldworkType || traineeResult.rows[0].fieldwork_type;
+
     const existing = await pool.query(
-      'SELECT id FROM bcaba_monthly_verification WHERE trainee_id = $1 AND month_year = $2',
-      [traineeId, monthYear]
+      'SELECT id FROM bcaba_monthly_verification WHERE trainee_id = $1 AND month_year = $2 AND fieldwork_type = $3',
+      [traineeId, monthYear, fieldworkType]
     );
     if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'A monthly verification already exists for this trainee/month' });
+      return res.status(400).json({ error: `A ${fieldworkType} monthly verification already exists for this trainee/month` });
     }
 
     const [y, m] = monthYear.split('-').map(Number);
@@ -61,14 +71,11 @@ router.post('/draft', requireAuth, async (req, res) => {
 
     const entriesResult = await pool.query(
       `SELECT * FROM bcaba_fieldwork_entries
-       WHERE trainee_id = $1 AND supervisor_id = $2 AND entry_date >= $3 AND entry_date <= $4`,
-      [traineeId, supervisorId, periodStart, periodEnd]
+       WHERE trainee_id = $1 AND supervisor_id = $2 AND entry_date >= $3 AND entry_date <= $4
+         AND COALESCE(fieldwork_type, 'supervised') = $5`,
+      [traineeId, supervisorId, periodStart, periodEnd, fieldworkType]
     );
     const entries = entriesResult.rows;
-
-    const traineeResult = await pool.query('SELECT fieldwork_type FROM bcaba_trainees WHERE id = $1', [traineeId]);
-    if (traineeResult.rows.length === 0) return res.status(404).json({ error: 'Trainee not found' });
-    const fieldworkType = traineeResult.rows[0].fieldwork_type;
 
     // Observation entries represent a supervisor directly observing the trainee
     // and are therefore supervised time, not independent time, per the BCaBA
@@ -100,10 +107,10 @@ router.post('/draft', requireAuth, async (req, res) => {
     const insert = await pool.query(
       `INSERT INTO bcaba_monthly_verification
        (trainee_id, supervisor_id, month_year, independent_hours, supervised_hours, contacts_count,
-        observation_completed, individual_supervision_hours, group_supervision_hours, adjusted_hours, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
+        observation_completed, individual_supervision_hours, group_supervision_hours, adjusted_hours, status, fieldwork_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', $11)
        RETURNING *`,
-      [traineeId, supervisorId, monthYear, independentHours, supervisedHours, contactsCount, observationCompleted, individualHours, groupHours, totalHours]
+      [traineeId, supervisorId, monthYear, independentHours, supervisedHours, contactsCount, observationCompleted, individualHours, groupHours, totalHours, fieldworkType]
     );
     const record = insert.rows[0];
 
@@ -278,7 +285,10 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
     const totalHours = Number(v.independent_hours) + Number(v.supervised_hours);
     const supervisionPct = totalHours > 0 ? (Number(v.supervised_hours) / totalHours) * 100 : 0;
     const monthLabel = new Date(v.month_year).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    const fieldworkTypeLabel = trainee.fieldwork_type === 'concentrated' ? 'Concentrated Supervised Fieldwork' : 'Supervised Fieldwork';
+    // Use this record's own fieldwork_type, not the trainee's primary track —
+    // a trainee who mixes tracks can have M-FVFs of both types, and this PDF
+    // must reflect which one THIS record actually is.
+    const fieldworkTypeLabel = (v.fieldwork_type || trainee.fieldwork_type) === 'concentrated' ? 'Concentrated Supervised Fieldwork' : 'Supervised Fieldwork';
 
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
     res.setHeader('Content-Type', 'application/pdf');

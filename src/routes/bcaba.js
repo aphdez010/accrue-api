@@ -1,7 +1,8 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/pool.js';
-import { checkMonthlyCompliance, adjustMonthlyHours, totalProgress } from './bcaba-rules.js';
+import { checkMonthlyCompliance, adjustMonthlyHours, totalProgress, combinedTotal } from './bcaba-rules.js';
+import { computeSupervisorQualification } from './supervisor-qualifications.js';
 
 const router = express.Router();
 
@@ -113,16 +114,73 @@ router.post('/fieldwork-entries', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
 
-  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber } = req.body;
+  const { traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
   const loggedByRole = professional.role === 'supervisor' || professional.role === 'owner' ? 'supervisor' : 'trainee';
+
+  // fieldworkType lets a trainee tag this specific entry as Supervised or
+  // Concentrated Supervised Fieldwork, so hours can be mixed across tracks per
+  // the Handbook's Combining Fieldwork Types allowance. Defaults to the
+  // trainee's primary track for trainees who never mix types.
+  let resolvedFieldworkType = fieldworkType;
+  if (!resolvedFieldworkType) {
+    const { rows: [trainee] } = await pool.query('SELECT fieldwork_type FROM bcaba_trainees WHERE id = $1', [traineeId]);
+    resolvedFieldworkType = trainee?.fieldwork_type || 'supervised';
+  }
 
   const result = await pool.query(
     `INSERT INTO bcaba_fieldwork_entries
-      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present, activity_description, task_list_area, task_list_area_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null]
+      (trainee_id, supervisor_id, entry_date, entry_type, hours, activity_category, supervision_format, notes, logged_by_user_id, logged_by_role, restriction_type, client_present, entry_sync_type, supervisor_present, activity_description, task_list_area, task_list_area_number, fieldwork_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
+    [traineeId, supervisorId, entryDate, entryType, hours, activityCategory, supervisionFormat, notes, req.auth.userId, loggedByRole, restrictionType, clientPresent, entrySyncType ?? null, supervisorPresent ?? null, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, resolvedFieldworkType]
   );
   res.status(201).json(result.rows[0]);
+});
+
+router.patch('/fieldwork-entries/:id', requireAuth, async (req, res) => {
+  const professional = await getProfessionalRole(req.auth.userId);
+  if (!professional) return res.status(403).json({ error: 'Forbidden' });
+
+  const { id } = req.params;
+  const { rows: [entry] } = await pool.query('SELECT * FROM bcaba_fieldwork_entries WHERE id = $1', [id]);
+  if (!entry) return res.status(404).json({ error: 'Entry not found' });
+
+  const { rows: [trainee] } = await pool.query('SELECT user_id, supervisor_id FROM bcaba_trainees WHERE id = $1', [entry.trainee_id]);
+  const isOwner = trainee?.user_id === req.auth.userId;
+  const isSupervisor = trainee?.supervisor_id === professional.id;
+  if (!isOwner && !isSupervisor) return res.status(403).json({ error: 'Forbidden' });
+
+  const { entryDate, entryType, hours, activityCategory, supervisionFormat, notes, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription, taskListArea, taskListAreaNumber, fieldworkType } = req.body;
+
+  const result = await pool.query(
+    `UPDATE bcaba_fieldwork_entries SET
+       entry_date = COALESCE($1, entry_date), entry_type = COALESCE($2, entry_type),
+       hours = COALESCE($3, hours), activity_category = COALESCE($4, activity_category),
+       supervision_format = COALESCE($5, supervision_format), notes = $6,
+       restriction_type = COALESCE($7, restriction_type), client_present = COALESCE($8, client_present),
+       entry_sync_type = COALESCE($9, entry_sync_type), supervisor_present = COALESCE($10, supervisor_present),
+       activity_description = $11, task_list_area = $12, task_list_area_number = $13,
+       fieldwork_type = COALESCE($14, fieldwork_type)
+     WHERE id = $15 RETURNING *`,
+    [entryDate, entryType, hours, activityCategory, supervisionFormat, notes ?? null, restrictionType, clientPresent, entrySyncType, supervisorPresent, activityDescription ?? null, taskListArea ?? null, taskListAreaNumber ?? null, fieldworkType, id]
+  );
+  res.json(result.rows[0]);
+});
+
+router.delete('/fieldwork-entries/:id', requireAuth, async (req, res) => {
+  const professional = await getProfessionalRole(req.auth.userId);
+  if (!professional) return res.status(403).json({ error: 'Forbidden' });
+
+  const { id } = req.params;
+  const { rows: [entry] } = await pool.query('SELECT * FROM bcaba_fieldwork_entries WHERE id = $1', [id]);
+  if (!entry) return res.status(404).json({ error: 'Entry not found' });
+
+  const { rows: [trainee] } = await pool.query('SELECT user_id, supervisor_id FROM bcaba_trainees WHERE id = $1', [entry.trainee_id]);
+  const isOwner = trainee?.user_id === req.auth.userId;
+  const isSupervisor = trainee?.supervisor_id === professional.id;
+  if (!isOwner && !isSupervisor) return res.status(403).json({ error: 'Forbidden' });
+
+  await pool.query('DELETE FROM bcaba_fieldwork_entries WHERE id = $1', [id]);
+  res.json({ ok: true });
 });
 
 router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => {
@@ -144,38 +202,79 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
   );
 
   const rows = entries.rows;
-  // Observation entries represent a supervisor directly observing the trainee —
-  // supervised time, not something to exclude from the month's total. Previously
-  // these hours were dropped from totalHours entirely here, while the M-FVF draft
-  // route (bcaba-monthly-verification.js) counted them as independent hours — the
-  // two disagreed on the same data. Both now treat observation entries as
-  // supervised time, consistently.
-  const supervisedHours = rows.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((s, r) => s + Number(r.hours), 0);
-  const totalHours = rows.reduce((s, r) => s + Number(r.hours), 0);
-  const individualHours = rows.filter(r => r.supervision_format === 'individual').reduce((s, r) => s + Number(r.hours), 0);
-  const groupHours = rows.filter(r => r.supervision_format === 'group').reduce((s, r) => s + Number(r.hours), 0);
-  // Supervisor-trainee contacts: real-time interactions only, per Handbook p.20 —
-  // matches the equivalent rule on the BCBA side (bcba-rules.js / compliance.js)
-  // and the BCaBA M-FVF draft route. Previously counted any 'supervised'-typed
-  // entry regardless of whether it was synchronous or a recorded/asynchronous
-  // session, even though this route already captures entry_sync_type per entry.
-  const contactsCount = rows.filter(r => (r.entry_type === 'supervised' || r.entry_type === 'observation') && r.entry_sync_type === 'synchronized').length;
-  const observationCompleted = rows.some(r => r.entry_type === 'observation');
-  const unrestrictedHours = rows.filter(r => r.restriction_type === 'unrestricted').reduce((s, r) => s + Number(r.hours), 0);
-  const restrictedHours = rows.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);
-  const unrestrictedPct = totalHours > 0 ? unrestrictedHours / totalHours : 0;
-  const clientPresentHours = rows.filter(r => r.client_present === true).reduce((s, r) => s + Number(r.hours), 0);
 
-  const entrySummary = {
-    fieldworkType: trainee.rows[0].fieldwork_type,
-    totalHours, supervisedHours, individualHours, groupHours, contactsCount, observationCompleted,
-    unrestrictedHours, restrictedHours, unrestrictedPct, clientPresentHours,
+  // Builds the same summary shape for an arbitrary subset of this month's rows.
+  // Observation entries represent a supervisor directly observing the trainee —
+  // supervised time, not independent time, and not something to exclude from
+  // the total (previously these hours were dropped entirely here, while the
+  // M-FVF draft route counted them as independent — the two disagreed on the
+  // same data; both now treat observation entries as supervised, consistently).
+  function summarize(subset, fieldworkType) {
+    const supervisedHours = subset.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((s, r) => s + Number(r.hours), 0);
+    const totalHours = subset.reduce((s, r) => s + Number(r.hours), 0);
+    const individualHours = subset.filter(r => r.supervision_format === 'individual').reduce((s, r) => s + Number(r.hours), 0);
+    const groupHours = subset.filter(r => r.supervision_format === 'group').reduce((s, r) => s + Number(r.hours), 0);
+    // Supervisor-trainee contacts: real-time interactions only, per Handbook
+    // p.20 — matches the equivalent rule on the BCBA side and the M-FVF draft
+    // route. Previously counted any 'supervised'-typed entry regardless of
+    // sync type, even though sync type is captured per entry.
+    const contactsCount = subset.filter(r => (r.entry_type === 'supervised' || r.entry_type === 'observation') && r.entry_sync_type === 'synchronized').length;
+    const observationCompleted = subset.some(r => r.entry_type === 'observation');
+    const unrestrictedHours = subset.filter(r => r.restriction_type === 'unrestricted').reduce((s, r) => s + Number(r.hours), 0);
+    const restrictedHours = subset.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);
+    const unrestrictedPct = totalHours > 0 ? unrestrictedHours / totalHours : 0;
+    const clientPresentHours = subset.filter(r => r.client_present === true).reduce((s, r) => s + Number(r.hours), 0);
+    const summary = {
+      fieldworkType, totalHours, supervisedHours, individualHours, groupHours, contactsCount, observationCompleted,
+      unrestrictedHours, restrictedHours, unrestrictedPct, clientPresentHours,
+    };
+    return { summary, compliance: checkMonthlyCompliance(summary), adjusted: adjustMonthlyHours(summary) };
+  }
+
+  // Top-level summary/compliance/adjusted (kept for backward compatibility with
+  // existing callers): the trainee's combined activity this month across
+  // whichever fieldwork type(s) they logged, using their primary track's rules.
+  // This is what most trainees see, since most never mix types.
+  const overall = summarize(rows, trainee.rows[0].fieldwork_type);
+
+  // Per-type breakdown: entries can now be individually tagged Supervised or
+  // Concentrated (see fieldwork_type on the entry), and each type has its own
+  // monthly rules (contacts, supervision %, min/max hours, and — for
+  // Concentrated — no proration allowed at all). A trainee who mixed types
+  // this month needs each subset checked against ITS OWN rules, not the
+  // trainee's single primary-track rules applied uniformly.
+  const byType = {
+    supervised: summarize(rows.filter(r => (r.fieldwork_type || 'supervised') === 'supervised'), 'supervised'),
+    concentrated: summarize(rows.filter(r => r.fieldwork_type === 'concentrated'), 'concentrated'),
   };
 
-  const compliance = checkMonthlyCompliance(entrySummary);
-  const adjusted = adjustMonthlyHours(entrySummary);
+  // All-time combined progress toward the trainee's target, using the
+  // Handbook's Combining Fieldwork Types rule (1.3x multiplier on Concentrated
+  // hours). Uses raw logged hours across every month, not the per-month
+  // adjusted/eligible figure used on the final signed M-FVF/F-FVF — this is a
+  // running estimate for the trainee's own dashboard, not a certification
+  // document.
+  const allTime = await pool.query(
+    `SELECT COALESCE(fieldwork_type, 'supervised') AS fieldwork_type, COALESCE(SUM(hours), 0) AS hours
+     FROM bcaba_fieldwork_entries WHERE trainee_id = $1 GROUP BY COALESCE(fieldwork_type, 'supervised')`,
+    [id]
+  );
+  const allTimeSupervised = Number(allTime.rows.find(r => r.fieldwork_type === 'supervised')?.hours || 0);
+  const allTimeConcentrated = Number(allTime.rows.find(r => r.fieldwork_type === 'concentrated')?.hours || 0);
+  const combinedProgress = {
+    supervisedHours: allTimeSupervised,
+    concentratedHours: allTimeConcentrated,
+    ...combinedTotal(allTimeConcentrated, allTimeSupervised),
+  };
 
-  res.json({ entries: rows, compliance, adjusted, summary: entrySummary });
+  res.json({
+    entries: rows,
+    compliance: overall.compliance,
+    adjusted: overall.adjusted,
+    summary: overall.summary,
+    byType,
+    combinedProgress,
+  });
 });
 
 router.get('/supervisor/trainees', requireAuth, async (req, res) => {
@@ -212,7 +311,46 @@ router.get('/trainees/:id/supervisors', requireAuth, async (req, res) => {
 
   if (!isTrainee && !isListedSupervisor) return res.status(403).json({ error: 'Forbidden' });
 
-  res.json({ supervisors: supervisors.rows });
+  const withQualification = supervisors.rows.map((s) => ({ ...s, qualification: computeSupervisorQualification(s) }));
+  res.json({ supervisors: withQualification });
+});
+
+// PATCH /bcaba/trainees/:id/supervisors/:supervisorId/qualifications — records
+// a supervisor's own BCBA certification date and, if in their first year,
+// their consulting supervisor's name and most recent consultation date. Same
+// Handbook rule as the BCBA-side equivalent (PATCH /supervisors/:id/qualifications).
+// Body: { certificationDate, consultingSupervisorName, consultingSupervisorLastConsultationDate }
+router.patch('/trainees/:id/supervisors/:supervisorId/qualifications', requireAuth, async (req, res) => {
+  const { userId } = req.auth;
+  const { id, supervisorId } = req.params;
+
+  const trainee = await pool.query('SELECT user_id FROM bcaba_trainees WHERE id = $1', [id]);
+  if (!trainee.rows[0]) return res.status(404).json({ error: 'Trainee not found' });
+  const isTrainee = trainee.rows[0].user_id === userId;
+
+  const target = await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE id = $1 AND trainee_id = $2',
+    [supervisorId, id]
+  );
+  if (!target.rows[0]) return res.status(404).json({ error: 'Supervisor not found' });
+  const isThisSupervisor = target.rows[0] && (await pool.query(
+    'SELECT id FROM bcaba_supervisors WHERE id = $1 AND supervisor_user_id = $2',
+    [supervisorId, userId]
+  )).rows.length > 0;
+
+  if (!isTrainee && !isThisSupervisor) return res.status(403).json({ error: 'Forbidden' });
+
+  const { certificationDate, consultingSupervisorName, consultingSupervisorLastConsultationDate } = req.body;
+  const { rows: [updated] } = await pool.query(
+    `UPDATE bcaba_supervisors
+     SET supervisor_certification_date = COALESCE($1, supervisor_certification_date),
+         consulting_supervisor_name = $2,
+         consulting_supervisor_last_consultation_date = $3
+     WHERE id = $4
+     RETURNING *`,
+    [certificationDate || null, consultingSupervisorName || null, consultingSupervisorLastConsultationDate || null, supervisorId]
+  );
+  res.json({ ...updated, qualification: computeSupervisorQualification(updated) });
 });
 
 // POST /bcaba/trainees/:id/supervisors — add an additional (non-responsible)

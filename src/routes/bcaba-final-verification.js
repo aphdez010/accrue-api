@@ -60,7 +60,7 @@ router.get('/supervisors', requireAuth, async (req, res) => {
 
 router.post('/draft', requireAuth, async (req, res) => {
   try {
-    const { trainee_id, supervisor_id, period_start_date, period_end_date, form_type, organization_name } = req.body;
+    const { trainee_id, supervisor_id, period_start_date, period_end_date, form_type, organization_name, fieldwork_type: requestedFieldworkType } = req.body;
 
     if (!trainee_id || !supervisor_id || !period_start_date || !period_end_date || !form_type) {
       return res.status(400).json({ error: 'trainee_id, supervisor_id, period_start_date, period_end_date, and form_type are required' });
@@ -76,23 +76,33 @@ router.post('/draft', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized for this trainee/supervisor relationship' });
     }
 
+    // fieldwork_type disambiguates which track this F-FVF covers. Required now
+    // that a trainee can have both a Supervised and a Concentrated finalized
+    // monthly verification for the same month — mixing them into one F-FVF
+    // would combine two different rule sets' months into a single form, which
+    // the Handbook doesn't allow ("Please complete one form per supervisor,
+    // per fieldwork type"). Defaults to the trainee's primary track when
+    // omitted, preserving prior behavior for trainees who never mix types.
+    const fieldworkType = requestedFieldworkType || trainee.fieldwork_type;
+
     const { rows: months } = await pool.query(
       `SELECT * FROM bcaba_monthly_verification
        WHERE trainee_id = $1 AND supervisor_id = $2
          AND month_year >= $3 AND month_year <= $4
          AND status = 'finalized'
+         AND COALESCE(fieldwork_type, 'supervised') = $5
        ORDER BY month_year ASC`,
-      [trainee_id, supervisor_id, period_start_date, period_end_date]
+      [trainee_id, supervisor_id, period_start_date, period_end_date, fieldworkType]
     );
 
     if (months.length === 0) {
-      return res.status(400).json({ error: 'No finalized monthly verifications found in this date range for this trainee/supervisor' });
+      return res.status(400).json({ error: `No finalized ${fieldworkType} monthly verifications found in this date range for this trainee/supervisor` });
     }
 
     const mapped = months.map((m) => {
       const totalHours = Number(m.independent_hours || 0) + Number(m.supervised_hours || 0);
       const compliance = checkMonthlyCompliance({
-        fieldworkType: trainee.fieldwork_type,
+        fieldworkType,
         totalHours,
         contactsCount: m.contacts_count,
         observationCompleted: m.observation_completed,
@@ -127,7 +137,7 @@ router.post('/draft', requireAuth, async (req, res) => {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'draft')
       RETURNING *`,
       [
-        trainee_id, supervisor_id, form_type, trainee.fieldwork_type,
+        trainee_id, supervisor_id, form_type, fieldworkType,
         period_start_date, period_end_date, organization_name || null,
         agg.total_independent_hours, agg.total_supervised_hours,
         agg.total_individual_supervision_hours, agg.total_group_supervision_hours,
