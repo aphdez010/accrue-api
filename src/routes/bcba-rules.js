@@ -1,20 +1,28 @@
 // BCBA Supervised Fieldwork track requirements
-// Source: BACB Board Certified Behavior Analyst Handbook, updated 02/2026, and
-// BACB's "Guidance for Meeting the BCBA Requirements During the 2027 Transition"
-// (Updated 01/2026).
+// Source: BACB Board Certified Behavior Analyst Handbook, Updated 06/2026
+// (verified directly against the source PDF, "2027 Eligibility Requirements"
+// section, pp. 25-28 — "Overview of Fieldwork Requirements" table).
 //
 // Two rule sets are maintained because the BACB's 2027 changes apply only to trainees
 // whose fieldwork clock starts on/after Jan 1, 2027 — trainees already accruing hours
 // stay on the current rules for the duration of that fieldwork experience. Do NOT collapse
 // this into a single rule set or gate it on "today's date"; gate it on fieldworkStartDate.
 //
-// CONFIRMED 07/2026: the 2027 requirements eliminate the monthly supervision-contacts
-// count entirely — this is a genuine BACB policy change, not an oversight. Per the
-// BACB's own 2027 Transition Guidance: "The 2027 requirements shift from
-// contact-focused to duration-focused tracking." Only percentage-of-hours-supervised
-// and observation-duration requirements apply under 2027; there is no minimum number
-// of monthly meetings. contactsPerMonth is therefore null for both 2027 tracks, and
-// adjustMonthlyHours() must skip the contacts-proration step when it's null.
+// VERIFIED 07/2026 against the BCBA Handbook (06/2026) 2027 fieldwork requirements
+// table: the "Number of contacts with supervisor per supervisory period" row present
+// in the 2022 table is absent entirely from the 2027 table. It is replaced by an
+// "Observations of trainee with client per supervisory period" row expressed in
+// cumulative minutes (60 Supervised / 90 Concentrated) rather than a count. So under
+// 2027, only percentage-of-hours-supervised and cumulative observation-minutes apply;
+// there is no minimum number of monthly supervisor-trainee contacts. contactsPerMonth
+// is therefore null for both 2027 tracks, and adjustMonthlyHours() must skip the
+// contacts-proration step when it's null.
+//
+// NOTE — intentional BCBA/BCaBA asymmetry, not a copy-paste bug: the parallel BCaBA
+// 2027 pathway (BCaBA Handbook, verified 06/2026) KEEPS its 4/6 contacts-per-month
+// requirement unchanged in 2027 — only its observation requirement moves to cumulative
+// minutes. Only the BCBA pathway drops contacts entirely. Do not "fix" bcaba-rules.js
+// to match this file's contactsPerMonth: null; that would be incorrect for BCaBA.
 export const BCBA_RULES_2022 = {
   supervised: {
     totalHoursRequired: 2000,
