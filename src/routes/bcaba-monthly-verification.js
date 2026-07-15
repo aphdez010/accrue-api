@@ -284,7 +284,7 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
 
     const totalHours = Number(v.independent_hours) + Number(v.supervised_hours);
     const supervisionPct = totalHours > 0 ? (Number(v.supervised_hours) / totalHours) * 100 : 0;
-    const monthLabel = new Date(v.month_year).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const monthLabel = new Date(v.month_year).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     // Use this record's own fieldwork_type, not the trainee's primary track —
     // a trainee who mixes tracks can have M-FVFs of both types, and this PDF
     // must reflect which one THIS record actually is.

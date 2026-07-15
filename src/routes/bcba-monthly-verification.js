@@ -212,7 +212,7 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
 
     const totalHours = Number(v.independent_hours) + Number(v.supervised_hours);
     const supervisionPct = totalHours > 0 ? (Number(v.supervised_hours) / totalHours) * 100 : 0;
-    const monthLabel = new Date(v.month_year).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const monthLabel = new Date(v.month_year).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     const fieldworkTypeLabel = v.fieldwork_type === 'concentrated' ? 'Concentrated Supervised Fieldwork' : 'Supervised Fieldwork';
 
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
