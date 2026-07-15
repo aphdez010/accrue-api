@@ -203,13 +203,21 @@ router.patch('/:id/make-responsible', requireAuth, async (req, res) => {
 router.patch('/:id/link', requireAuth, async (req, res) => {
   try {
     const { rows: [pro] } = await pool.query(
-      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      'SELECT id, email FROM professionals WHERE clerk_user_id = $1',
       [req.auth.userId]
     );
     if (!pro) return res.status(404).json({ error: 'Professional not found' });
 
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'email is required' });
+    // Compare by email, not clerk_user_id -- a single email can have more than
+    // one professionals row under different clerk_user_ids (e.g. stale
+    // duplicate/test accounts), so a clerk_user_id-only check can miss a
+    // genuine self-link attempt if the lookup happens to resolve a different
+    // duplicate row than the caller's own.
+    if (pro.email && email && pro.email.toLowerCase() === email.toLowerCase()) {
+      return res.status(400).json({ error: 'You cannot link yourself as your own supervisor' });
+    }
 
     const { rows: [existingSupervisor] } = await pool.query(
       'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
@@ -231,6 +239,34 @@ router.patch('/:id/link', requireAuth, async (req, res) => {
     res.json({ ...updated, qualification: computeSupervisorQualification(updated), linked_account_name: account.full_name });
   } catch (err) {
     console.error('PATCH /supervisors/:id/link error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /supervisors/:id/unlink — reverses a link, reverting to the
+// trainee-captures-both-signatures fallback. Only the trainee who owns this
+// supervisor record can unlink it.
+router.patch('/:id/unlink', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { rows: [existingSupervisor] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existingSupervisor) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE supervisors SET supervisor_user_id = NULL WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    res.json({ ...updated, qualification: computeSupervisorQualification(updated) });
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/unlink error:', err);
     res.status(500).json({ error: err.message });
   }
 });
