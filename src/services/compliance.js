@@ -25,8 +25,8 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
   const independentHours = entries.filter(e => !e.supervised).reduce((sum, e) => sum + Number(e.hours || 0), 0);
   const unrestricted = entries.filter(e => e.experience_type === 'Unrestricted Hours').reduce((sum, e) => sum + Number(e.hours || 0), 0);
   const restricted = entries.filter(e => e.experience_type === 'Restricted Hours').reduce((sum, e) => sum + Number(e.hours || 0), 0);
-  const individualHours = entries.filter(e => e.supervised && e.supervision_format === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
-  const groupHours = entries.filter(e => e.supervised && e.supervision_format === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+  const individualHours = entries.filter(e => e.supervised && e.supervision_group_type === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+  const groupHours = entries.filter(e => e.supervised && e.supervision_group_type === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
 
   const supervisionPct = totalHours > 0 ? (supervisedHours / totalHours) * 100 : 0;
   const restrictedPct = totalHours > 0 ? (restricted / totalHours) * 100 : 0;
@@ -41,8 +41,8 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
     const monthEntries = entries.filter(e => toMonthKey(e.entry_date) === monthKey);
 
     const monthIndependent = monthEntries.filter(e => !e.supervised).reduce((sum, e) => sum + Number(e.hours || 0), 0);
-    const monthIndividual = monthEntries.filter(e => e.supervised && e.supervision_format === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
-    const monthGroup = monthEntries.filter(e => e.supervised && e.supervision_format === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+    const monthIndividual = monthEntries.filter(e => e.supervised && e.supervision_group_type === 'Individual').reduce((sum, e) => sum + Number(e.hours || 0), 0);
+    const monthGroup = monthEntries.filter(e => e.supervised && e.supervision_group_type === 'Group').reduce((sum, e) => sum + Number(e.hours || 0), 0);
 
     // Contact count only includes SYNCHRONIZED supervised entries. Per BACB
     // guidance: a supervisor reviewing a recorded/asynchronous session
