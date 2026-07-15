@@ -144,11 +144,22 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
   );
 
   const rows = entries.rows;
-  const totalHours = rows.filter(r => r.entry_type !== 'observation').reduce((s, r) => s + Number(r.hours), 0);
-  const supervisedHours = rows.filter(r => r.entry_type === 'supervised').reduce((s, r) => s + Number(r.hours), 0);
+  // Observation entries represent a supervisor directly observing the trainee —
+  // supervised time, not something to exclude from the month's total. Previously
+  // these hours were dropped from totalHours entirely here, while the M-FVF draft
+  // route (bcaba-monthly-verification.js) counted them as independent hours — the
+  // two disagreed on the same data. Both now treat observation entries as
+  // supervised time, consistently.
+  const supervisedHours = rows.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((s, r) => s + Number(r.hours), 0);
+  const totalHours = rows.reduce((s, r) => s + Number(r.hours), 0);
   const individualHours = rows.filter(r => r.supervision_format === 'individual').reduce((s, r) => s + Number(r.hours), 0);
   const groupHours = rows.filter(r => r.supervision_format === 'group').reduce((s, r) => s + Number(r.hours), 0);
-  const contactsCount = rows.filter(r => r.entry_type === 'supervised').length;
+  // Supervisor-trainee contacts: real-time interactions only, per Handbook p.20 —
+  // matches the equivalent rule on the BCBA side (bcba-rules.js / compliance.js)
+  // and the BCaBA M-FVF draft route. Previously counted any 'supervised'-typed
+  // entry regardless of whether it was synchronous or a recorded/asynchronous
+  // session, even though this route already captures entry_sync_type per entry.
+  const contactsCount = rows.filter(r => (r.entry_type === 'supervised' || r.entry_type === 'observation') && r.entry_sync_type === 'synchronized').length;
   const observationCompleted = rows.some(r => r.entry_type === 'observation');
   const unrestrictedHours = rows.filter(r => r.restriction_type === 'unrestricted').reduce((s, r) => s + Number(r.hours), 0);
   const restrictedHours = rows.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);

@@ -70,27 +70,47 @@ router.post('/draft', requireAuth, async (req, res) => {
     if (traineeResult.rows.length === 0) return res.status(404).json({ error: 'Trainee not found' });
     const fieldworkType = traineeResult.rows[0].fieldwork_type;
 
-    const supervisedHours = entries.filter(e => e.entry_type === 'supervised').reduce((s, e) => s + Number(e.hours || 0), 0);
-    const independentHours = entries.filter(e => e.entry_type !== 'supervised').reduce((s, e) => s + Number(e.hours || 0), 0);
+    // Observation entries represent a supervisor directly observing the trainee
+    // and are therefore supervised time, not independent time, per the BCaBA
+    // Handbook's fieldwork documentation requirements — an observation is not
+    // "supervisor not present." Independent hours are hours where no supervisor
+    // was involved at all.
+    const supervisedHours = entries
+      .filter(e => e.entry_type === 'supervised' || e.entry_type === 'observation')
+      .reduce((s, e) => s + Number(e.hours || 0), 0);
+    const independentHours = entries
+      .filter(e => e.entry_type !== 'supervised' && e.entry_type !== 'observation')
+      .reduce((s, e) => s + Number(e.hours || 0), 0);
     const individualHours = entries.filter(e => e.supervision_format === 'individual').reduce((s, e) => s + Number(e.hours || 0), 0);
     const groupHours = entries.filter(e => e.supervision_format === 'group').reduce((s, e) => s + Number(e.hours || 0), 0);
     const observationCompleted = entries.some(e => e.entry_type === 'observation');
     const totalHours = supervisedHours + independentHours;
 
+    // Supervisor-trainee contacts: real-time interactions only, per Handbook p.20
+    // ("if your supervisor watches a recorded video... but does not provide
+    // immediate, real-time feedback, that hour... [does not] count toward the
+    // supervisor-trainee contact requirement"). Matches the equivalent rule
+    // already applied on the BCBA side (bcba-rules.js / compliance.js). This
+    // was previously hardcoded to a literal 0 below, which meant every draft
+    // always failed the contacts requirement regardless of actual entries.
+    const contactsCount = entries.filter(
+      (e) => (e.entry_type === 'supervised' || e.entry_type === 'observation') && e.entry_sync_type === 'synchronized'
+    ).length;
+
     const insert = await pool.query(
       `INSERT INTO bcaba_monthly_verification
        (trainee_id, supervisor_id, month_year, independent_hours, supervised_hours, contacts_count,
         observation_completed, individual_supervision_hours, group_supervision_hours, adjusted_hours, status)
-       VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, 'draft')
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
        RETURNING *`,
-      [traineeId, supervisorId, monthYear, independentHours, supervisedHours, observationCompleted, individualHours, groupHours, totalHours]
+      [traineeId, supervisorId, monthYear, independentHours, supervisedHours, contactsCount, observationCompleted, individualHours, groupHours, totalHours]
     );
     const record = insert.rows[0];
 
     const compliance = checkMonthlyCompliance({
       fieldworkType,
       totalHours,
-      contactsCount: 0,
+      contactsCount,
       observationCompleted,
       individualHours,
       groupHours,
