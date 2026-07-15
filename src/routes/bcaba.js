@@ -212,6 +212,7 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
   function summarize(subset, fieldworkType) {
     const supervisedHours = subset.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((s, r) => s + Number(r.hours), 0);
     const totalHours = subset.reduce((s, r) => s + Number(r.hours), 0);
+    const independentHours = totalHours - supervisedHours;
     const individualHours = subset.filter(r => r.supervision_format === 'individual').reduce((s, r) => s + Number(r.hours), 0);
     const groupHours = subset.filter(r => r.supervision_format === 'group').reduce((s, r) => s + Number(r.hours), 0);
     // Supervisor-trainee contacts: real-time interactions only, per Handbook
@@ -224,7 +225,7 @@ router.get('/trainees/:id/monthly/:monthYear', requireAuth, async (req, res) => 
     const restrictedHours = subset.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);
     const unrestrictedPct = totalHours > 0 ? unrestrictedHours / totalHours : 0;
     const summary = {
-      fieldworkType, totalHours, supervisedHours, individualHours, groupHours, contactsCount, observationCompleted,
+      fieldworkType, totalHours, supervisedHours, independentHours, individualHours, groupHours, contactsCount, observationCompleted,
       unrestrictedHours, restrictedHours, unrestrictedPct,
     };
     return { summary, compliance: checkMonthlyCompliance(summary), adjusted: adjustMonthlyHours(summary) };

@@ -49,13 +49,14 @@ router.get('/', requireAuth, async (req, res) => {
 // Note on the supervision-CEU trigger: the Handbook requires the 3 supervision
 // CEUs only for certificants who supervised the ongoing practice of an RBT or
 // BCaBA, or a BCBA/BCaBA trainee's fieldwork, at any point during the cycle.
-// This app can only reliably detect the BCaBA-supervision case (via
-// bcaba_supervisors.supervisor_user_id, a real account link) — the BCBA
-// fieldwork `supervisors` table is free-text per-trainee with no reverse link
-// back to a supervising professional's own account, so BCBA-side supervision
-// can't be auto-detected from current data. supervisionRequired below is
-// therefore a best-effort signal, not a guarantee — always show the
-// requirement as relevant rather than hiding it when uncertain.
+// This checks both BCaBA-linked supervision (bcaba_supervisors.supervisor_user_id)
+// and BCBA-linked supervision (supervisors.supervisor_user_id, added once a
+// trainee links their supervisor's account via PATCH /supervisors/:id/link).
+// Both are real account links, but a supervisor only shows up here once a
+// trainee has actually linked them — an unlinked (free-text-only) supervisor
+// relationship still can't be detected. supervisionRequired is therefore a
+// best-effort signal, not a guarantee — always show the requirement as
+// relevant rather than hiding it when uncertain.
 router.get('/summary', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
@@ -88,7 +89,11 @@ router.get('/summary', requireAuth, async (req, res) => {
       `SELECT COUNT(*)::int AS count FROM bcaba_supervisors WHERE supervisor_user_id = $1`,
       [userId]
     );
-    const supervisionRequired = Number(bcabaSupCount.count) > 0;
+    const { rows: [bcbaSupCount] } = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM supervisors WHERE supervisor_user_id = $1`,
+      [userId]
+    );
+    const supervisionRequired = Number(bcabaSupCount.count) > 0 || Number(bcbaSupCount.count) > 0;
 
     const now = new Date();
     const daysUntilRecertification = Math.ceil((cycle.cycleEnd - now) / (1000 * 60 * 60 * 24));
