@@ -13,6 +13,15 @@ async function getProfessional(clerkUserId) {
   return rows[0] || null;
 }
 
+// Returns true if clerkUserId is the linked account for the given supervisor
+// record (supervisors.supervisor_user_id). Most BCBA supervisors won't be
+// linked (they're free-text records the trainee maintains) -- this only
+// matters once a trainee has used PATCH /supervisors/:id/link.
+async function isLinkedSupervisor(clerkUserId, supervisorId) {
+  const { rows: [s] } = await pool.query('SELECT supervisor_user_id FROM supervisors WHERE id = $1', [supervisorId]);
+  return !!s && s.supervisor_user_id === clerkUserId;
+}
+
 // Mirrors bcaba-rules.js's checkMonthlyCompliance() shape/behavior, but reads
 // BCBA's rule set (which varies by fieldworkStartDate: 2022 vs 2027 Handbook
 // rules) via getBcbaRules() instead of BCaBA's fixed BCABA_REQUIREMENTS.
@@ -118,6 +127,38 @@ router.post('/draft', requireAuth, async (req, res) => {
   }
 });
 
+// GET /bcba-monthly-verification?traineeId=<professionals.id>
+// Supervisor-side: for a linked supervisor account viewing one trainee's
+// M-FVFs. The trainee themselves should use GET /mine instead.
+router.get('/', requireAuth, async (req, res) => {
+  try {
+    const { traineeId } = req.query;
+    if (!traineeId) return res.status(400).json({ error: 'traineeId is required' });
+
+    const { rows } = await pool.query(
+      `SELECT mv.*, s.supervisor_name, s.supervisor_user_id FROM bcba_monthly_verification mv
+       JOIN supervisors s ON s.id = mv.supervisor_id
+       WHERE mv.professional_id = $1 AND s.supervisor_user_id = $2
+       ORDER BY mv.month_year DESC`,
+      [traineeId, req.auth.userId]
+    );
+    if (rows.length === 0) {
+      // Distinguish "no records yet" from "you're not this trainee's linked
+      // supervisor" so the frontend can show the right message -- check once
+      // whether any linked relationship exists at all before assuming empty.
+      const { rows: [link] } = await pool.query(
+        'SELECT id FROM supervisors WHERE professional_id = $1 AND supervisor_user_id = $2',
+        [traineeId, req.auth.userId]
+      );
+      if (!link) return res.status(403).json({ error: 'You are not a linked supervisor for this trainee' });
+    }
+    res.json({ verifications: rows });
+  } catch (err) {
+    console.error('GET /bcba-monthly-verification error:', err);
+    res.status(500).json({ error: 'Failed to fetch verifications' });
+  }
+});
+
 // GET /bcba-monthly-verification/mine
 router.get('/mine', requireAuth, async (req, res) => {
   try {
@@ -153,7 +194,25 @@ router.patch('/:id/sign', requireAuth, async (req, res) => {
 
     const { rows: [record] } = await pool.query('SELECT * FROM bcba_monthly_verification WHERE id = $1', [id]);
     if (!record) return res.status(404).json({ error: 'Verification not found' });
-    if (record.professional_id !== pro.id) return res.status(403).json({ error: 'Not authorized for this record' });
+
+    const isTrainee = record.professional_id === pro.id;
+    const { rows: [supervisorRow] } = await pool.query('SELECT supervisor_user_id FROM supervisors WHERE id = $1', [record.supervisor_id]);
+    const supervisorIsLinked = !!supervisorRow?.supervisor_user_id;
+    const isLinkedSupervisorCaller = supervisorIsLinked && supervisorRow.supervisor_user_id === req.auth.userId;
+
+    if (role === 'trainee') {
+      if (!isTrainee) return res.status(403).json({ error: 'Only the trainee can sign as trainee' });
+    } else {
+      // Signing as supervisor: once a real account is linked (via
+      // PATCH /supervisors/:id/link), only that account may sign as
+      // supervisor -- the trainee capturing both signatures was only ever a
+      // fallback for supervisors without their own Supervisd account.
+      if (supervisorIsLinked) {
+        if (!isLinkedSupervisorCaller) return res.status(403).json({ error: 'This supervisor is linked to their own account -- only they can sign as supervisor' });
+      } else if (!isTrainee) {
+        return res.status(403).json({ error: 'Not authorized for this record' });
+      }
+    }
 
     const timestampField = role === 'trainee' ? 'trainee_signed_at' : 'supervisor_signed_at';
     const signatureField = role === 'trainee' ? 'trainee_signature' : 'supervisor_signature';
@@ -206,8 +265,12 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
 
     const { rows: [v] } = await pool.query('SELECT * FROM bcba_monthly_verification WHERE id = $1', [req.params.id]);
     if (!v) return res.status(404).json({ error: 'Verification not found' });
-    if (v.professional_id !== pro.id) return res.status(403).json({ error: 'Not authorized to view this record' });
 
+    const isTrainee = v.professional_id === pro.id;
+    const isLinked = await isLinkedSupervisor(req.auth.userId, v.supervisor_id);
+    if (!isTrainee && !isLinked) return res.status(403).json({ error: 'Not authorized to view this record' });
+
+    const { rows: [trainee] } = await pool.query('SELECT * FROM professionals WHERE id = $1', [v.professional_id]);
     const { rows: [supervisor] } = await pool.query('SELECT * FROM supervisors WHERE id = $1', [v.supervisor_id]);
 
     const totalHours = Number(v.independent_hours) + Number(v.supervised_hours);
@@ -237,8 +300,8 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
     }
 
     let y = doc.y;
-    field('Trainee Name', pro.full_name, MARGIN, y, 260);
-    field('BACB ID #', pro.credential_number, MARGIN + 280, y, 120);
+    field('Trainee Name', trainee.full_name, MARGIN, y, 260);
+    field('BACB ID #', trainee.credential_number, MARGIN + 280, y, 120);
     field('Month/Year', monthLabel, MARGIN + 410, y, 140);
 
     y += 42;

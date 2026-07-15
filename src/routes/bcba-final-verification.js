@@ -10,6 +10,39 @@ async function getProfessional(clerkUserId) {
   return rows[0] || null;
 }
 
+async function isLinkedSupervisor(clerkUserId, supervisorId) {
+  const { rows: [s] } = await pool.query('SELECT supervisor_user_id FROM supervisors WHERE id = $1', [supervisorId]);
+  return !!s && s.supervisor_user_id === clerkUserId;
+}
+
+// GET /bcba-final-verification?traineeId=<professionals.id>
+// Supervisor-side: for a linked supervisor viewing one trainee's F-FVFs.
+router.get('/', requireAuth, async (req, res) => {
+  try {
+    const { traineeId } = req.query;
+    if (!traineeId) return res.status(400).json({ error: 'traineeId is required' });
+
+    const { rows } = await pool.query(
+      `SELECT fv.*, s.supervisor_name FROM bcba_final_verifications fv
+       JOIN supervisors s ON s.id = fv.supervisor_id
+       WHERE fv.professional_id = $1 AND s.supervisor_user_id = $2
+       ORDER BY fv.created_at DESC`,
+      [traineeId, req.auth.userId]
+    );
+    if (rows.length === 0) {
+      const { rows: [link] } = await pool.query(
+        'SELECT id FROM supervisors WHERE professional_id = $1 AND supervisor_user_id = $2',
+        [traineeId, req.auth.userId]
+      );
+      if (!link) return res.status(403).json({ error: 'You are not a linked supervisor for this trainee' });
+    }
+    res.json({ finalVerifications: rows });
+  } catch (err) {
+    console.error('GET /bcba-final-verification error:', err);
+    res.status(500).json({ error: 'Failed to fetch F-FVFs' });
+  }
+});
+
 // POST /bcba-final-verification/draft
 // Body: { supervisorId, periodStartDate, periodEndDate, fieldworkType, organizationName }
 // Aggregates every finalized bcba_monthly_verification in range for this
@@ -126,7 +159,21 @@ router.patch('/:id/sign', requireAuth, async (req, res) => {
 
     const { rows: [record] } = await pool.query('SELECT * FROM bcba_final_verifications WHERE id = $1', [id]);
     if (!record) return res.status(404).json({ error: 'Not found' });
-    if (record.professional_id !== pro.id) return res.status(403).json({ error: 'Not authorized for this record' });
+
+    const isTrainee = record.professional_id === pro.id;
+    const { rows: [supervisorRow] } = await pool.query('SELECT supervisor_user_id FROM supervisors WHERE id = $1', [record.supervisor_id]);
+    const supervisorIsLinked = !!supervisorRow?.supervisor_user_id;
+    const isLinkedSupervisorCaller = supervisorIsLinked && supervisorRow.supervisor_user_id === req.auth.userId;
+
+    if (role === 'trainee') {
+      if (!isTrainee) return res.status(403).json({ error: 'Only the trainee can sign as trainee' });
+    } else {
+      if (supervisorIsLinked) {
+        if (!isLinkedSupervisorCaller) return res.status(403).json({ error: 'This supervisor is linked to their own account -- only they can sign as supervisor' });
+      } else if (!isTrainee) {
+        return res.status(403).json({ error: 'Not authorized for this record' });
+      }
+    }
 
     const timestampField = role === 'trainee' ? 'trainee_signed_at' : 'supervisor_signed_at';
     const signatureField = role === 'trainee' ? 'trainee_signature' : 'supervisor_signature';
@@ -160,8 +207,12 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
 
     const { rows: [fv] } = await pool.query('SELECT * FROM bcba_final_verifications WHERE id = $1', [req.params.id]);
     if (!fv) return res.status(404).json({ error: 'Not found' });
-    if (fv.professional_id !== pro.id) return res.status(403).json({ error: 'Not authorized to view this F-FVF' });
 
+    const isTrainee = fv.professional_id === pro.id;
+    const isLinked = await isLinkedSupervisor(req.auth.userId, fv.supervisor_id);
+    if (!isTrainee && !isLinked) return res.status(403).json({ error: 'Not authorized to view this F-FVF' });
+
+    const { rows: [trainee] } = await pool.query('SELECT * FROM professionals WHERE id = $1', [fv.professional_id]);
     const { rows: [supervisor] } = await pool.query('SELECT * FROM supervisors WHERE id = $1', [fv.supervisor_id]);
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -175,8 +226,8 @@ router.get('/:id/pdf', requireAuth, async (req, res) => {
     doc.moveDown();
     doc.fillColor('black').fontSize(10);
 
-    doc.text(`Trainee Name: ${pro.full_name}`);
-    doc.text(`BACB ID #: ${pro.credential_number || ''}`);
+    doc.text(`Trainee Name: ${trainee.full_name}`);
+    doc.text(`BACB ID #: ${trainee.credential_number || ''}`);
     doc.text(`Supervisor Name: ${supervisor?.supervisor_name || ''}`);
     doc.text(`Supervisor BACB ID #: ${supervisor?.supervisor_credential || ''}`);
     doc.text(`Fieldwork Type: ${fv.fieldwork_type === 'concentrated' ? 'Concentrated Supervised Fieldwork' : 'Supervised Fieldwork'}`);

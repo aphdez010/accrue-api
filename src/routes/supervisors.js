@@ -194,4 +194,66 @@ router.patch('/:id/make-responsible', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /supervisors/:id/link — links a supervisor record to a real Supervisd
+// account by email, so that account can independently view and sign this
+// trainee's M-FVF/F-FVF as the supervisor, rather than the trainee capturing
+// both signatures themselves. Mirrors bcaba_supervisors.supervisor_user_id.
+// Only the trainee who owns this supervisor record can link it.
+// Body: { email }
+router.patch('/:id/link', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email is required' });
+
+    const { rows: [existingSupervisor] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existingSupervisor) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const { rows: [account] } = await pool.query(
+      'SELECT clerk_user_id, full_name FROM professionals WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+    if (!account) return res.status(404).json({ error: 'No Supervisd account found for that email. They need to sign up before you can link them.' });
+    if (account.clerk_user_id === req.auth.userId) return res.status(400).json({ error: 'You cannot link yourself as your own supervisor' });
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE supervisors SET supervisor_user_id = $1 WHERE id = $2 RETURNING *`,
+      [account.clerk_user_id, req.params.id]
+    );
+    res.json({ ...updated, qualification: computeSupervisorQualification(updated), linked_account_name: account.full_name });
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/link error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /supervisors/my-trainees — for a certified BCBA whose account has been
+// linked (via PATCH /:id/link above) as the named supervisor on one or more
+// trainees' fieldwork. Mirrors GET /bcaba/supervisor/trainees.
+router.get('/my-trainees', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.id AS supervisor_record_id, s.professional_id, s.is_responsible,
+              p.full_name, p.credential_number, p.bcba_supervision_track, p.fieldwork_start_date
+       FROM supervisors s
+       JOIN professionals p ON p.id = s.professional_id
+       WHERE s.supervisor_user_id = $1
+       ORDER BY p.full_name ASC`,
+      [req.auth.userId]
+    );
+    res.json({ trainees: rows });
+  } catch (err) {
+    console.error('GET /supervisors/my-trainees error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
