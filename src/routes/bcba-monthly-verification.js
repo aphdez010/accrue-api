@@ -166,7 +166,7 @@ router.get('/mine', requireAuth, async (req, res) => {
     if (!pro) return res.status(404).json({ error: 'Professional not found' });
 
     const { rows } = await pool.query(
-      `SELECT mv.*, s.supervisor_name FROM bcba_monthly_verification mv
+      `SELECT mv.*, s.supervisor_name, s.supervisor_user_id FROM bcba_monthly_verification mv
        JOIN supervisors s ON s.id = mv.supervisor_id
        WHERE mv.professional_id = $1 ORDER BY mv.month_year DESC`,
       [pro.id]
