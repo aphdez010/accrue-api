@@ -58,6 +58,7 @@ export function checkMonthlyCompliance(entry) {
  */
 export function adjustMonthlyHours(entry) {
   const req = BCABA_REQUIREMENTS[entry.fieldworkType];
+  const isConcentrated = entry.fieldworkType === 'concentrated';
 
   // No observation = zero eligible hours for the month
   if (!entry.observationCompleted) {
@@ -72,13 +73,29 @@ export function adjustMonthlyHours(entry) {
     return { adjustedHours: 0, reason: 'under_min_hours' };
   }
 
-  // Prorate based on contacts met, per Handbook example
+  // Concentrated Supervised Fieldwork hours may NOT be prorated or adjusted, per the
+  // BCaBA Handbook's "Adjusting and Documenting Fieldwork Hours" table note: concentrated
+  // hours may not be prorated or adjusted. A non-compliant Concentrated month must zero
+  // out entirely rather than receive partial credit — do not fall through to the
+  // contacts-proration or group-supervision-trim steps below for concentrated months.
+  if (isConcentrated) {
+    if (entry.contactsCount < req.contactsPerMonth) {
+      return { adjustedHours: 0, reason: 'insufficient_contacts_concentrated_not_prorated' };
+    }
+    if (entry.groupHours > entry.individualHours) {
+      return { adjustedHours: 0, reason: 'group_exceeds_individual_concentrated_not_prorated' };
+    }
+    return { adjustedHours: Math.round(hours * 100) / 100, reason: null };
+  }
+
+  // Prorate based on contacts met, per Handbook example (Supervised track only —
+  // concentrated months are handled above and never reach this point)
   // (e.g., 2 of 4 required contacts = 50% of hours count)
   if (entry.contactsCount < req.contactsPerMonth) {
     hours *= entry.contactsCount / req.contactsPerMonth;
   }
 
-  // Group supervision may not exceed individual supervision hours
+  // Group supervision may not exceed individual supervision hours (Supervised track only)
   if (entry.groupHours > entry.individualHours) {
     // Reduce group hours down to match individual (handbook adjustment rule)
     const excessGroup = entry.groupHours - entry.individualHours;
