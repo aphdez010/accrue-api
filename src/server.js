@@ -19,7 +19,6 @@ import bcabaFinalVerificationRouter from './routes/bcaba-final-verification.js';
 import bcbaMonthlyVerificationRouter from './routes/bcba-monthly-verification.js';
 import bcbaFinalVerificationRouter from './routes/bcba-final-verification.js';
 import supervisorsRouter from './routes/supervisors.js';
-import adminMigrateRouter from './routes/admin-migrate.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -52,7 +51,6 @@ app.use('/bcaba-final-verification', bcabaFinalVerificationRouter);
 app.use('/bcba-monthly-verification', bcbaMonthlyVerificationRouter);
 app.use('/bcba-final-verification', bcbaFinalVerificationRouter);
 app.use('/supervisors', supervisorsRouter);
-app.use('/admin-migrate', adminMigrateRouter);
 
 
 app.listen(PORT, () => {
