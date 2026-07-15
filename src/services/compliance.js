@@ -124,15 +124,18 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
         e.monthly_observation && toMonthKey(e.entry_date) === currentMonth
       );
 
-  // Task list area coverage (unrelated to BACB fieldwork compliance —
-  // this maps to a custom activity taxonomy, not the BCBA Test Content
-  // Outline's 9 content areas. Left as-is; flag if this needs realigning
-  // to the actual TCO letters A-I from the exam blueprint.)
+  // Task list area coverage — tracks which BCBA Test Content Outline (6th ed.)
+  // content domains a trainee's logged fieldwork has touched. These names are
+  // transcribed directly from the official BACB TCO document and must stay in
+  // sync with accrue-web's app/lib/bcba-tco.ts (the frontend's task_list_area
+  // dropdown source) — task_list_area is free text on the entry, so a mismatch
+  // here would silently break coverage detection for whichever domains differ.
   const TASK_AREAS = [
-    'A. Measurement', 'B. Skill Acquisition', 'C. Behavior Reduction',
-    'D. Documentation & Reporting', 'E. Professional Conduct',
-    'F. Behavior Assessment', 'G. Behavior-Change Procedures',
-    'H. Selecting & Implementing Interventions', 'I. Personnel Supervision',
+    'A. Behaviorism and Philosophical Foundations', 'B. Concepts and Principles',
+    'C. Measurement, Data Display, and Interpretation', 'D. Experimental Design',
+    'E. Ethical and Professional Issues', 'F. Behavior Assessment',
+    'G. Behavior-Change Procedures', 'H. Selecting and Implementing Interventions',
+    'I. Personnel Supervision and Management',
   ];
   const coveredAreas = new Set(entries.map(e => e.task_list_area).filter(Boolean));
   const taskListCoverage = TASK_AREAS.map(area => ({
