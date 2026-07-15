@@ -42,13 +42,30 @@ router.get('/', requireAuth, async (req, res) => {
       [req.auth.userId]
     );
     if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    // Optional ?month=YYYY-MM filter — the fieldwork calendar sends this on every
+    // month navigation and expects the response scoped to that calendar month
+    // (BACB compliance, e.g. the 20-130hr min/max, is tracked per calendar month).
+    // Validate strictly so a malformed value fails loudly instead of silently
+    // matching everything.
+    const { month } = req.query;
+    const params = [pro.id];
+    let monthFilter = '';
+    if (month !== undefined) {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return res.status(400).json({ error: 'month must be in YYYY-MM format' });
+      }
+      params.push(`${month}-01`);
+      monthFilter = ` AND date_trunc('month', fe.entry_date) = date_trunc('month', $2::date)`;
+    }
+
     const { rows } = await pool.query(
       `SELECT fe.*, s.supervisor_name, s.is_responsible AS supervisor_is_responsible
        FROM fieldwork_entries fe
        LEFT JOIN supervisors s ON s.id = fe.supervisor_id
-       WHERE fe.professional_id = $1
+       WHERE fe.professional_id = $1${monthFilter}
        ORDER BY fe.entry_date DESC`,
-      [pro.id]
+      params
     );
     res.json(rows);
   } catch (err) {
