@@ -16,6 +16,8 @@ import bcabaRouter from './routes/bcaba.js';
 import invoicesRouter from './routes/invoices.js';
 import bcabaMonthlyVerificationRouter from './routes/bcaba-monthly-verification.js';
 import bcabaFinalVerificationRouter from './routes/bcaba-final-verification.js';
+import bcbaMonthlyVerificationRouter from './routes/bcba-monthly-verification.js';
+import bcbaFinalVerificationRouter from './routes/bcba-final-verification.js';
 import supervisorsRouter from './routes/supervisors.js';
 import adminMigrateRouter from './routes/admin-migrate.js';
 
@@ -47,6 +49,8 @@ app.use('/bcaba', bcabaRouter);
 app.use('/invoices', invoicesRouter);
 app.use('/bcaba-monthly-verification', bcabaMonthlyVerificationRouter);
 app.use('/bcaba-final-verification', bcabaFinalVerificationRouter);
+app.use('/bcba-monthly-verification', bcbaMonthlyVerificationRouter);
+app.use('/bcba-final-verification', bcbaFinalVerificationRouter);
 app.use('/supervisors', supervisorsRouter);
 app.use('/admin-migrate', adminMigrateRouter);
 
