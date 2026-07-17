@@ -2,6 +2,7 @@ import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/pool.js';
 import { checkMonthlyCompliance, adjustMonthlyHours, totalProgress, combinedTotal, BCABA_REQUIREMENTS } from './bcaba-rules.js';
+import { getFieldworkDeadline } from './bcba-rules.js';
 import { computeSupervisorQualification } from './supervisor-qualifications.js';
 
 const router = express.Router();
@@ -366,6 +367,18 @@ router.get('/supervisor/trainee-status', requireAuth, async (req, res) => {
         monthState = chk.compliant ? 'on_track' : 'at_risk';
       }
 
+      // 5-year fieldwork window (BACB: fieldwork must be accrued within 5
+      // consecutive years). bcaba_trainees has no explicit start-date column,
+      // so infer the clock start from the earliest logged entry — the same
+      // approximation the BCBA side uses.
+      let fieldworkDeadline = null;
+      if (rows.length > 0) {
+        const startDate = new Date(rows[0].entry_date);
+        if (!isNaN(startDate.getTime())) {
+          fieldworkDeadline = getFieldworkDeadline(startDate).toISOString().slice(0, 10);
+        }
+      }
+
       out.push({
         professional_id: t.id,
         id: t.id,
@@ -385,7 +398,7 @@ router.get('/supervisor/trainee-status', requireAuth, async (req, res) => {
         monthState,
         atRisk: monthState === 'at_risk',
         reasons,
-        fieldworkDeadline: null,
+        fieldworkDeadline,
         months,
       });
     }
