@@ -34,6 +34,21 @@ await pool.query(`
   ADD COLUMN IF NOT EXISTS fieldwork_type TEXT NOT NULL DEFAULT 'supervised';
 `);
 
+// BCBA-parity documentation fields on BCaBA fieldwork entries: start/end time,
+// supervision modality (Face to Face / Video Call / With Client) kept separate
+// from the individual/group value already stored in supervision_format,
+// supervisor name, and the observation setting + minutes. All nullable and
+// documentation-only — the BCaBA compliance engine is unchanged.
+await pool.query(`
+  ALTER TABLE bcaba_fieldwork_entries
+  ADD COLUMN IF NOT EXISTS start_time TEXT,
+  ADD COLUMN IF NOT EXISTS end_time TEXT,
+  ADD COLUMN IF NOT EXISTS supervision_modality TEXT,
+  ADD COLUMN IF NOT EXISTS supervisor_name TEXT,
+  ADD COLUMN IF NOT EXISTS setting TEXT,
+  ADD COLUMN IF NOT EXISTS observation_minutes INTEGER;
+`);
+
 // Supervisor qualifications: certification date + consulting supervisor, per
 // Handbook "Supervisor Qualifications" (a supervisor certified less than one
 // year must receive monthly consultation from a qualified consulting
