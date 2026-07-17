@@ -446,6 +446,11 @@ router.get('/trainee-status', requireAuth, async (req, res) => {
           atRisk: reasons.length > 0,
           reasons,
           fieldworkDeadline: c.fieldworkDeadline ?? null,
+          months: (c.monthlyBreakdown || []).map(m => ({
+            month: m.month,
+            rawHours: m.rawHours,
+            eligibleHours: m.eligibleHours,
+          })),
         });
       } catch (e) {
         out.push({ professional_id: t.id, full_name: t.full_name, error: true });
