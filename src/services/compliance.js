@@ -124,26 +124,6 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
         e.monthly_observation && toMonthKey(e.entry_date) === currentMonth
       );
 
-  // Task list area coverage — tracks which BCBA Test Content Outline (6th ed.)
-  // content domains a trainee's logged fieldwork has touched. These names are
-  // transcribed directly from the official BACB TCO document and must stay in
-  // sync with accrue-web's app/lib/bcba-tco.ts (the frontend's task_list_area
-  // dropdown source) — task_list_area is free text on the entry, so a mismatch
-  // here would silently break coverage detection for whichever domains differ.
-  const TASK_AREAS = [
-    'A. Behaviorism and Philosophical Foundations', 'B. Concepts and Principles',
-    'C. Measurement, Data Display, and Interpretation', 'D. Experimental Design',
-    'E. Ethical and Professional Issues', 'F. Behavior Assessment',
-    'G. Behavior-Change Procedures', 'H. Selecting and Implementing Interventions',
-    'I. Personnel Supervision and Management',
-  ];
-  const coveredAreas = new Set(entries.map(e => e.task_list_area).filter(Boolean));
-  const taskListCoverage = TASK_AREAS.map(area => ({
-    area,
-    covered: coveredAreas.has(area),
-  }));
-  const taskListCoverageCount = coveredAreas.size;
-
   // Projected completion now uses ELIGIBLE hours, not raw — a trainee
   // logging plenty of raw hours but missing contacts/observations
   // shouldn't see an optimistic completion date.
@@ -210,8 +190,6 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
     monthlyBreakdown,
     fieldworkDeadline: fieldworkDeadline ? fieldworkDeadline.toISOString().slice(0, 10) : null,
     fieldworkStartDateSource: fieldworkStartDate ? 'explicit' : 'inferred_from_earliest_entry',
-    taskListCoverage,
-    taskListCoverageCount,
     projectedCompletionDate,
     combinedTrackProgress,
   };
