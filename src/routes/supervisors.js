@@ -292,4 +292,74 @@ router.get('/my-trainees', requireAuth, async (req, res) => {
   }
 });
 
+// POST /supervisors/my-trainees — supervisor-initiated linkage. Attaches an
+// existing trainee account to the calling BCBA supervisor by email: creates a
+// supervisors record on the TRAINEE's account, pre-linked to this supervisor
+// (supervisor_user_id), so it appears immediately under GET /my-trainees and
+// the trainee sees this supervisor in their Fieldwork Supervisors panel.
+// This is the inverse of the trainee-initiated PATCH /:id/link flow. It grants
+// visibility only; M-FVF/F-FVF signatures remain per-party identity-verified,
+// so a supervisor still cannot forge a trainee's signature. Mirrors the BCaBA
+// add-by-email flow (POST /bcaba/trainees). Body: { traineeEmail }
+router.post('/my-trainees', requireAuth, async (req, res) => {
+  try {
+    const { rows: [me] } = await pool.query(
+      'SELECT id, email, full_name, credential_number FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!me) return res.status(404).json({ error: 'Professional not found' });
+
+    const { traineeEmail } = req.body;
+    if (!traineeEmail || !traineeEmail.trim()) {
+      return res.status(400).json({ error: 'traineeEmail is required' });
+    }
+    const email = traineeEmail.trim();
+
+    // Self-add guard (by email and by clerk id), mirroring the link handler.
+    if (me.email && me.email.toLowerCase() === email.toLowerCase()) {
+      return res.status(400).json({ error: 'You cannot add yourself as your own trainee' });
+    }
+
+    const { rows: [trainee] } = await pool.query(
+      'SELECT id, clerk_user_id, full_name FROM professionals WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+    if (!trainee) {
+      return res.status(404).json({ error: 'No Supervisd account found for that email. They need to sign up before you can add them.' });
+    }
+    if (trainee.clerk_user_id === req.auth.userId) {
+      return res.status(400).json({ error: 'You cannot add yourself as your own trainee' });
+    }
+
+    // Idempotent: if this supervisor is already linked to this trainee, return it.
+    const { rows: [already] } = await pool.query(
+      `SELECT id AS supervisor_record_id, professional_id, is_responsible
+         FROM supervisors
+        WHERE professional_id = $1 AND supervisor_user_id = $2`,
+      [trainee.id, req.auth.userId]
+    );
+    if (already) {
+      return res.json({ trainee: { ...already, full_name: trainee.full_name }, alreadyLinked: true });
+    }
+
+    // The first supervisor on a trainee's fieldwork defaults to Responsible.
+    const { rows: [countRow] } = await pool.query(
+      'SELECT COUNT(*) FROM supervisors WHERE professional_id = $1',
+      [trainee.id]
+    );
+    const isFirst = Number(countRow.count) === 0;
+
+    const { rows: [created] } = await pool.query(
+      `INSERT INTO supervisors (professional_id, supervisor_name, supervisor_credential, supervisor_user_id, is_responsible)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id AS supervisor_record_id, professional_id, is_responsible`,
+      [trainee.id, me.full_name || 'Supervisor', me.credential_number || null, req.auth.userId, isFirst]
+    );
+    res.json({ trainee: { ...created, full_name: trainee.full_name } });
+  } catch (err) {
+    console.error('POST /supervisors/my-trainees error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
