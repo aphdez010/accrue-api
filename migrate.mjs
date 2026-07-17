@@ -60,5 +60,14 @@ await pool.query(`
   ADD COLUMN IF NOT EXISTS recertification_date DATE;
 `);
 
+// Professionals: account_type is the durable "what is this account" axis
+// ('bcba_trainee' | 'bcaba_trainee' | 'supervisor'), set at onboarding and used
+// to bind each user to a single dashboard view. Distinct from
+// bcba_supervision_track (supervised/concentrated), which is the fieldwork type.
+await pool.query(`
+  ALTER TABLE professionals
+  ADD COLUMN IF NOT EXISTS account_type TEXT;
+`);
+
 console.log('Migration complete');
 await pool.end();

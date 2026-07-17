@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS professionals (
   email TEXT NOT NULL,
   full_name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'rbt',
+  account_type TEXT, -- 'bcba_trainee' | 'bcaba_trainee' | 'supervisor' (durable view binding, set at onboarding)
   credential_number TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
