@@ -111,6 +111,34 @@ router.post('/trainees', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /bcaba/trainees/:id/track — set the trainee's primary track (Supervised
+// 1,300 hrs vs Concentrated 1,000 hrs). Mirrors the BCBA track toggle.
+router.patch('/trainees/:id/track', requireAuth, async (req, res) => {
+  try {
+    const professional = await getProfessionalRole(req.auth.userId);
+    if (!professional) return res.status(403).json({ error: 'Forbidden' });
+    const { id } = req.params;
+    const { track } = req.body;
+    if (track !== 'supervised' && track !== 'concentrated') {
+      return res.status(400).json({ error: 'Invalid track' });
+    }
+    const { rows: [trainee] } = await pool.query('SELECT user_id, supervisor_id FROM bcaba_trainees WHERE id = $1', [id]);
+    if (!trainee) return res.status(404).json({ error: 'Trainee not found' });
+    const isOwner = trainee.user_id === req.auth.userId;
+    const isSupervisor = trainee.supervisor_id === professional.id;
+    if (!isOwner && !isSupervisor) return res.status(403).json({ error: 'Forbidden' });
+    const targetHours = track === 'concentrated' ? 1000 : 1300;
+    const { rows: [updated] } = await pool.query(
+      'UPDATE bcaba_trainees SET fieldwork_type = $1, target_hours = $2 WHERE id = $3 RETURNING *',
+      [track, targetHours, id]
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error('PATCH /bcaba/trainees/:id/track error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/fieldwork-entries', requireAuth, async (req, res) => {
   const professional = await getProfessionalRole(req.auth.userId);
   if (!professional) return res.status(403).json({ error: 'Forbidden' });
