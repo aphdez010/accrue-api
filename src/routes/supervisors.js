@@ -394,12 +394,22 @@ router.get('/trainee-status', requireAuth, async (req, res) => {
           if (!c.monthlyObservationMet) reasons.push('observation missing');
           if (c.contactsMet === false) reasons.push('contacts below minimum');
         }
+        const eligible = c.totalEligibleHours ?? 0;
+        const target = c.totalHoursRequired ?? 2000;
         out.push({
           professional_id: t.id,
           full_name: t.full_name,
+          track: t.bcba_supervision_track || 'supervised',
           totalHours: c.totalHours ?? 0,
-          totalHoursRequired: c.totalHoursRequired ?? 2000,
+          totalEligibleHours: eligible,
+          totalHoursRequired: target,
+          pctComplete: target > 0 ? Math.round((eligible / target) * 1000) / 10 : 0,
+          supervisionPct: c.supervisionPct ?? 0,
+          supervisionMet: !!c.supervisionMet,
+          restrictedPct: c.restrictedPct ?? 0,
+          restrictedMet: c.restrictedMet !== false,
           hoursThisMonth,
+          monthState: hoursThisMonth === 0 ? 'not_started' : (reasons.length > 0 ? 'at_risk' : 'on_track'),
           atRisk: reasons.length > 0,
           reasons,
           fieldworkDeadline: c.fieldworkDeadline ?? null,
