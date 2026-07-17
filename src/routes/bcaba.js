@@ -1,7 +1,7 @@
 import express from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { pool } from '../db/pool.js';
-import { checkMonthlyCompliance, adjustMonthlyHours, totalProgress, combinedTotal } from './bcaba-rules.js';
+import { checkMonthlyCompliance, adjustMonthlyHours, totalProgress, combinedTotal, BCABA_REQUIREMENTS } from './bcaba-rules.js';
 import { computeSupervisorQualification } from './supervisor-qualifications.js';
 
 const router = express.Router();
@@ -286,6 +286,114 @@ router.get('/supervisor/trainees', requireAuth, async (req, res) => {
     [professional.id]
   );
   res.json(result.rows);
+});
+
+// GET /bcaba/supervisor/trainee-status — per-trainee compliance status + a
+// per-month breakdown for every BCaBA trainee this supervisor oversees. Mirrors
+// the BCBA /supervisors/trainee-status response shape so the supervisor
+// dashboard can render BCaBA trainees in the same metrics table, Monthly Review
+// chart, and per-trainee view. Reuses the existing BCaBA month aggregation
+// (summarize -> checkMonthlyCompliance / adjustMonthlyHours) so the numbers
+// match the trainee's own compliance page.
+router.get('/supervisor/trainee-status', requireAuth, async (req, res) => {
+  try {
+    const professional = await getProfessionalRole(req.auth.userId);
+    if (!professional) return res.status(403).json({ error: 'Forbidden' });
+
+    const trainees = await pool.query(
+      'SELECT id, full_name, fieldwork_type, target_hours FROM bcaba_trainees WHERE supervisor_id = $1 ORDER BY full_name',
+      [professional.id]
+    );
+
+    const round = (n) => Math.round(Number(n || 0) * 100) / 100;
+    const monthKeyOf = (d) => {
+      const dt = new Date(d);
+      return dt.getUTCFullYear() + '-' + String(dt.getUTCMonth() + 1).padStart(2, '0');
+    };
+    const now = new Date();
+    const currentMonthKey = now.getUTCFullYear() + '-' + String(now.getUTCMonth() + 1).padStart(2, '0');
+
+    // Same per-month aggregation the trainee's own monthly view uses.
+    function summarize(subset, fieldworkType) {
+      const supervisedHours = subset.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((s, r) => s + Number(r.hours), 0);
+      const totalHours = subset.reduce((s, r) => s + Number(r.hours), 0);
+      const individualHours = subset.filter(r => r.supervision_format === 'individual').reduce((s, r) => s + Number(r.hours), 0);
+      const groupHours = subset.filter(r => r.supervision_format === 'group').reduce((s, r) => s + Number(r.hours), 0);
+      const contactsCount = subset.filter(r => (r.entry_type === 'supervised' || r.entry_type === 'observation') && r.entry_sync_type === 'synchronized').length;
+      const observationCompleted = subset.some(r => r.entry_type === 'observation');
+      const unrestrictedHours = subset.filter(r => r.restriction_type === 'unrestricted').reduce((s, r) => s + Number(r.hours), 0);
+      const restrictedHours = subset.filter(r => r.restriction_type === 'restricted').reduce((s, r) => s + Number(r.hours), 0);
+      return { fieldworkType, totalHours, supervisedHours, individualHours, groupHours, contactsCount, observationCompleted, unrestrictedHours, restrictedHours };
+    }
+
+    const out = [];
+    for (const t of trainees.rows) {
+      const track = t.fieldwork_type === 'concentrated' ? 'concentrated' : 'supervised';
+      const trackReq = BCABA_REQUIREMENTS[track];
+      const entriesRes = await pool.query('SELECT * FROM bcaba_fieldwork_entries WHERE trainee_id = $1 ORDER BY entry_date', [t.id]);
+      const rows = entriesRes.rows;
+
+      const monthMap = {};
+      for (const r of rows) {
+        const k = monthKeyOf(r.entry_date);
+        (monthMap[k] = monthMap[k] || []).push(r);
+      }
+      const months = Object.keys(monthMap).sort().map(k => {
+        const s = summarize(monthMap[k], track);
+        const adj = adjustMonthlyHours(s);
+        return { month: k, rawHours: round(s.totalHours), eligibleHours: round(adj.adjustedHours || 0) };
+      });
+
+      const totalHours = round(rows.reduce((sum, r) => sum + Number(r.hours || 0), 0));
+      const totalEligibleHours = round(months.reduce((sum, m) => sum + m.eligibleHours, 0));
+      const supervisedHours = rows.filter(r => r.entry_type === 'supervised' || r.entry_type === 'observation').reduce((sum, r) => sum + Number(r.hours || 0), 0);
+      const unrestrictedHours = rows.filter(r => r.restriction_type === 'unrestricted').reduce((sum, r) => sum + Number(r.hours || 0), 0);
+      const restrictedHours = rows.filter(r => r.restriction_type === 'restricted').reduce((sum, r) => sum + Number(r.hours || 0), 0);
+      const target = Number(t.target_hours) || trackReq.totalHoursRequired;
+      const supervisionPct = totalHours > 0 ? (supervisedHours / totalHours) * 100 : 0;
+      const restrictedPct = totalHours > 0 ? (restrictedHours / totalHours) * 100 : 0;
+      const unrestrictedPct = totalHours > 0 ? (unrestrictedHours / totalHours) * 100 : 0;
+
+      const cur = monthMap[currentMonthKey];
+      let monthState = 'not_started';
+      let reasons = [];
+      let hoursThisMonth = 0;
+      if (cur && cur.length) {
+        const s = summarize(cur, track);
+        hoursThisMonth = round(s.totalHours);
+        const chk = checkMonthlyCompliance(s);
+        reasons = chk.issues || [];
+        monthState = chk.compliant ? 'on_track' : 'at_risk';
+      }
+
+      out.push({
+        professional_id: t.id,
+        id: t.id,
+        full_name: t.full_name,
+        cred: 'BCaBA',
+        track,
+        totalHours,
+        totalEligibleHours,
+        totalHoursRequired: target,
+        pctComplete: target > 0 ? Math.min(100, Math.round((totalEligibleHours / target) * 100)) : 0,
+        supervisionPct: round(supervisionPct),
+        supervisionMet: supervisionPct >= (trackReq.supervisionPct * 100),
+        restrictedPct: round(restrictedPct),
+        restrictedMet: unrestrictedPct >= (BCABA_REQUIREMENTS.unrestrictedMinPct * 100),
+        unrestrictedPct: round(unrestrictedPct),
+        hoursThisMonth,
+        monthState,
+        atRisk: monthState === 'at_risk',
+        reasons,
+        fieldworkDeadline: null,
+        months,
+      });
+    }
+    res.json({ trainees: out });
+  } catch (err) {
+    console.error('GET /bcaba/supervisor/trainee-status error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /bcaba/trainees/:id/supervisors — list every supervisor relationship
