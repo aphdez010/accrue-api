@@ -36,7 +36,14 @@ router.get('/lookup', requireAuth, async (req, res) => {
 router.post('/', requireAuth, async (req, res) => {
   try {
     const { userId } = req.auth;
-    const { full_name, email, role, credential_number, bacb_pid, agency_name } = req.body;
+    const { full_name, email, role, credential_number, bacb_pid, agency_name, account_type } = req.body;
+    // account_type is the durable "what is this account" axis:
+    //   'bcba_trainee' | 'bcaba_trainee' | 'supervisor'
+    // It's set once at onboarding and is what the app uses to decide which
+    // view a user sees. It is NOT the same as bcba_supervision_track
+    // (supervised/concentrated), which is the fieldwork *type* for trainees.
+    const VALID_ACCOUNT_TYPES = ['bcba_trainee', 'bcaba_trainee', 'supervisor'];
+    const accountType = VALID_ACCOUNT_TYPES.includes(account_type) ? account_type : null;
     const existing = await pool.query(
       'SELECT id FROM professionals WHERE clerk_user_id = $1', [userId]
     );
@@ -48,17 +55,18 @@ router.post('/', requireAuth, async (req, res) => {
              role = COALESCE($4, role),
              credential_number = COALESCE($5, credential_number),
              bacb_pid = COALESCE($6, bacb_pid),
-             agency_name = COALESCE($7, agency_name)
+             agency_name = COALESCE($7, agency_name),
+             account_type = COALESCE($8, account_type)
          WHERE clerk_user_id = $1
          RETURNING *`,
-        [userId, email || null, full_name || null,role || null, credential_number || null, bacb_pid || null, agency_name || null]
+        [userId, email || null, full_name || null, role || null, credential_number || null, bacb_pid || null, agency_name || null, accountType]
       );
       return res.json(pro);
     }
     const { rows: [pro] } = await pool.query(
-      `INSERT INTO professionals (clerk_user_id, email, full_name, role, credential_number, bacb_pid,agency_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [userId, email, full_name, role || 'rbt', credential_number || null, bacb_pid || null, agency_name || null]
+      `INSERT INTO professionals (clerk_user_id, email, full_name, role, credential_number, bacb_pid, agency_name, account_type)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [userId, email, full_name, role || 'rbt', credential_number || null, bacb_pid || null, agency_name || null, accountType]
     );
     res.json(pro);
   } catch (err) {
