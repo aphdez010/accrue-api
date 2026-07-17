@@ -152,6 +152,39 @@ router.patch('/:id/training', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /supervisors/:id/credential
+// Sets the supervisor's BACB Account ID / Certification number. This value is
+// what prints in the "Certification # / BACB ID #" slot on the M-FVF and the
+// "Supervisor BACB ID #" slot on the F-FVF, so without it those forms render a
+// blank supervisor ID. Editable here because it was previously only settable at
+// add-time. Stored in the existing supervisor_credential column (no migration).
+router.patch('/:id/credential', requireAuth, async (req, res) => {
+  try {
+    const { rows: [pro] } = await pool.query(
+      'SELECT id FROM professionals WHERE clerk_user_id = $1',
+      [req.auth.userId]
+    );
+    if (!pro) return res.status(404).json({ error: 'Professional not found' });
+
+    const { credential } = req.body;
+
+    const { rows: [existingSupervisor] } = await pool.query(
+      'SELECT id FROM supervisors WHERE id = $1 AND professional_id = $2',
+      [req.params.id, pro.id]
+    );
+    if (!existingSupervisor) return res.status(404).json({ error: 'Supervisor not found' });
+
+    const { rows: [updated] } = await pool.query(
+      `UPDATE supervisors SET supervisor_credential = $1 WHERE id = $2 RETURNING *`,
+      [credential ? String(credential).trim() : null, req.params.id]
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error('PATCH /supervisors/:id/credential error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /supervisors/:id/make-responsible
 // Reassigns the Responsible Supervisor for the logged-in trainee — clears
 // the flag on whoever currently holds it and sets it on the target, in one
