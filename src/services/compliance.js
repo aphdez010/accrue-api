@@ -30,6 +30,7 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
 
   const supervisionPct = totalHours > 0 ? (supervisedHours / totalHours) * 100 : 0;
   const restrictedPct = totalHours > 0 ? (restricted / totalHours) * 100 : 0;
+  const unrestrictedPct = totalHours > 0 ? (unrestricted / totalHours) * 100 : 0;
   const individualPct = supervisedHours > 0 ? (individualHours / supervisedHours) * 100 : 0;
 
   // --- Per-month breakdown + BACB adjustment engine (p.23) ---
@@ -175,11 +176,16 @@ export function calcCompliance(entries, track = 'supervised', fieldworkStartDate
     restricted: round(restricted),
     supervisionPct: round(supervisionPct),
     restrictedPct: round(restrictedPct),
+    unrestrictedPct: round(unrestrictedPct),
     individualHours: round(individualHours),
     groupHours: round(groupHours),
     individualPct: round(individualPct),
     supervisionMet: supervisionPct >= (rules.supervisionPct * 100),
     restrictedMet: restrictedPct <= ((1 - rules.unrestrictedMinPct) * 100),
+    // Handbook p.16: unrestricted activities must be >= 60% of TOTAL fieldwork
+    // hours. Checked explicitly (not merely inferred from restricted <= 40%),
+    // so it stays correct regardless of any non-conforming legacy entries.
+    unrestrictedMet: totalHours === 0 ? true : unrestrictedPct >= (rules.unrestrictedMinPct * 100),
     individualMet: individualPct >= (rules.individualSupervisionMinPct * 100),
     contactsMet,
     contactsRequired: rules.contactsPerMonth,
