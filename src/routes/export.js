@@ -94,8 +94,7 @@ router.post('/', requireAuth, async (req, res) => {
       { label: 'HRS', x: MARGIN+158, w: 32, align: 'right' },
       { label: 'TYPE', x: MARGIN+196, w: 72 },
       { label: 'SETTING', x: MARGIN+274, w: 72 },
-      { label: 'TASK AREA', x: MARGIN+352, w: 72 },
-      { label: 'ACTIVITY', x: MARGIN+430, w: 200 },
+      { label: 'ACTIVITY', x: MARGIN+352, w: 278 },
       { label: 'SUPV', x: MARGIN+636, w: 36, align: 'center' },
     ]
 
@@ -124,7 +123,6 @@ router.post('/', requireAuth, async (req, res) => {
         const rowY = doc.y
         doc.rect(MARGIN, rowY, CONTENT_W, 18).fill(idx % 2 === 0 ? '#FFFFFF' : '#F7FAF8')
         const dateStr = entry.entry_date ? new Date(entry.entry_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : '—'
-        const taskStr = entry.task_list_area ? `${entry.task_list_area}${entry.task_list_area_number ? '-'+entry.task_list_area_number : ''}` : '—'
         const activityStr = entry.activity_description ? entry.activity_description.slice(0, 60) + (entry.activity_description.length > 60 ? '…' : '') : '—'
         doc.font('Helvetica').fontSize(8).fillColor('#0F2018')
         doc.text(dateStr, cols[0].x+4, rowY+5, { width: cols[0].w })
@@ -133,10 +131,9 @@ router.post('/', requireAuth, async (req, res) => {
         doc.text(parseFloat(entry.hours||0).toFixed(1), cols[3].x, rowY+5, { width: cols[3].w, align: 'right' })
         doc.text(entry.experience_type || '—', cols[4].x+4, rowY+5, { width: cols[4].w })
         doc.text(entry.setting || '—', cols[5].x+4, rowY+5, { width: cols[5].w })
-        doc.text(taskStr, cols[6].x+4, rowY+5, { width: cols[6].w })
-        doc.text(activityStr, cols[7].x+4, rowY+5, { width: cols[7].w })
+        doc.text(activityStr, cols[6].x+4, rowY+5, { width: cols[6].w })
         doc.font('Helvetica-Bold').fontSize(8).fillColor(entry.supervised ? '#1A7A50' : '#9AB5A5')
-        doc.text(entry.supervised ? 'Y' : '—', cols[8].x, rowY+5, { width: cols[8].w, align: 'center' })
+        doc.text(entry.supervised ? 'Y' : '—', cols[7].x, rowY+5, { width: cols[7].w, align: 'center' })
         doc.y = rowY + 20
       })
     }

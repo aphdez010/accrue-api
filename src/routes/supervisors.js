@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { computeSupervisorQualification } from './supervisor-qualifications.js';
+import { calcCompliance } from '../services/compliance.js';
 
 const router = Router();
 
@@ -358,6 +359,58 @@ router.post('/my-trainees', requireAuth, async (req, res) => {
     res.json({ trainee: { ...created, full_name: trainee.full_name } });
   } catch (err) {
     console.error('POST /supervisors/my-trainees error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /supervisors/trainee-status — per-BCBA-trainee current-month compliance
+// snapshot for the supervisor dashboard. Reuses calcCompliance. "At risk" is
+// deliberately conservative: only flagged when the trainee HAS logged hours
+// this month but the month isn't meeting supervision/observation/contact
+// requirements, so a trainee who simply hasn't started the month doesn't
+// false-alarm. BCBA trainees only for now (BCaBA uses a separate model).
+router.get('/trainee-status', requireAuth, async (req, res) => {
+  try {
+    const me = req.auth.userId;
+    const { rows: trainees } = await pool.query(
+      `SELECT DISTINCT p.id, p.full_name, p.bcba_supervision_track, p.fieldwork_start_date
+         FROM supervisors s JOIN professionals p ON p.id = s.professional_id
+        WHERE s.supervisor_user_id = $1`,
+      [me]
+    );
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const out = [];
+    for (const t of trainees) {
+      try {
+        const { rows: entries } = await pool.query(
+          'SELECT * FROM fieldwork_entries WHERE professional_id = $1', [t.id]
+        );
+        const c = calcCompliance(entries, t.bcba_supervision_track || 'supervised', t.fieldwork_start_date);
+        const cm = (c.monthlyBreakdown || []).find(m => m.month === currentMonth);
+        const hoursThisMonth = cm?.rawHours ?? 0;
+        const reasons = [];
+        if (hoursThisMonth > 0) {
+          if (!c.supervisionMet) reasons.push('supervision below minimum');
+          if (!c.monthlyObservationMet) reasons.push('observation missing');
+          if (c.contactsMet === false) reasons.push('contacts below minimum');
+        }
+        out.push({
+          professional_id: t.id,
+          full_name: t.full_name,
+          totalHours: c.totalHours ?? 0,
+          totalHoursRequired: c.totalHoursRequired ?? 2000,
+          hoursThisMonth,
+          atRisk: reasons.length > 0,
+          reasons,
+          fieldworkDeadline: c.fieldworkDeadline ?? null,
+        });
+      } catch (e) {
+        out.push({ professional_id: t.id, full_name: t.full_name, error: true });
+      }
+    }
+    res.json({ trainees: out });
+  } catch (err) {
+    console.error('GET /supervisors/trainee-status error:', err);
     res.status(500).json({ error: err.message });
   }
 });
